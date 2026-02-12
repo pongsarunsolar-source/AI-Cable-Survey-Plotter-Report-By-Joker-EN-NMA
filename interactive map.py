@@ -22,9 +22,10 @@ ssl._create_default_https_context = ssl._create_unverified_context
 genai.configure(api_key="AIzaSyBHAKfkjkb2wdzAZQZ74dFRD4Ib5Dj6cHY")
 model_ai = genai.GenerativeModel('gemini-1.5-flash')
 
+# ปรับปรุง: โหลด OCR ครั้งเดียว และบังคับใช้ CPU เพื่อประหยัด RAM
 @st.cache_resource
 def load_ocr():
-    return easyocr.Reader(['en'])
+    return easyocr.Reader(['en'], gpu=False)
 
 reader = load_ocr()
 
@@ -32,7 +33,7 @@ reader = load_ocr()
 def get_image_base64_from_drive(file_id):
     try:
         url = f"https://drive.google.com/uc?export=download&id={file_id}"
-        response = requests.get(url)
+        response = requests.get(url, timeout=10)
         if response.status_code == 200:
             return base64.b64encode(response.content).decode()
     except Exception:
@@ -40,8 +41,11 @@ def get_image_base64_from_drive(file_id):
     return None
 
 # --- 3. ฟังก์ชันวิเคราะห์สาเหตุ ---
+# ปรับปรุง: ย่อรูปก่อนส่งให้ AI เพื่อลดการใช้ Memory และ Bandwidth
 def analyze_cable_issue(image):
     try:
+        img_for_ai = image.copy()
+        img_for_ai.thumbnail((800, 800)) # ย่อรูปชั่วคราว
         prompt = """
         วิเคราะห์รูปภาพสายเคเบิลนี้และเลือกตอบเพียง "หนึ่งเดียว" จาก 4 สาเหตุต่อไปนี้เท่านั้น:
         1. cable ตกพื้น
@@ -51,7 +55,7 @@ def analyze_cable_issue(image):
         
         ตอบเฉพาะชื่อสาเหตุเป็นภาษาไทยเท่านั้น หากไม่ตรงกับข้อใดเลยให้ตอบว่า "ตรวจสอบไม่พบสาเหตุ"
         """
-        response = model_ai.generate_content([prompt, image])
+        response = model_ai.generate_content([prompt, img_for_ai])
         return response.text.strip()
     except Exception:
         return "วิเคราะห์ไม่ได้"
@@ -74,10 +78,13 @@ def get_lat_lon_exif(image):
                dms_to_decimal(gps_info['GPSLongitude'], gps_info['GPSLongitudeRef'])
     except: return None, None
 
+# ปรับปรุง: ย่อรูปก่อนทำ OCR เพื่อป้องกัน RAM เต็ม (ที่เป็นสาเหตุหลักของ Error Oh no)
 def get_lat_lon_ocr(image):
     try:
-        img_np = np.array(image)
-        results = reader.readtext(img_np)
+        img_for_ocr = image.copy()
+        img_for_ocr.thumbnail((1000, 1000)) # ย่อรูปให้เล็กลงแต่ยังอ่านออก
+        img_np = np.array(img_for_ocr)
+        results = reader.readtext(img_np, paragraph=True) # ใช้ paragraph=True เพื่อความเร็ว
         full_text = " ".join([res[1] for res in results])
         match = re.search(r'(\d+\.\d+)\s*[nN]\s+(\d+\.\d+)\s*[eE]', full_text)
         if match: return float(match.group(1)), float(match.group(2))
@@ -89,17 +96,17 @@ def img_to_custom_icon(img, issue_text):
     img_resized = img.copy()
     img_resized.thumbnail((150, 150)) 
     buf = BytesIO()
-    img_resized.save(buf, format="PNG")
+    img_resized.save(buf, format="JPEG", quality=70) # ใช้ JPEG เพื่อลดขนาดข้อมูลที่ส่งไปหน้าเว็บ
     img_str = base64.b64encode(buf.getvalue()).decode()
     return f'''
         <div style="position: relative; width: fit-content; background-color: white; padding: 5px; border-radius: 12px; box-shadow: 0px 8px 24px rgba(0,0,0,0.12); border: 2px solid #FF8C42; transform: translate(-50%, -100%); margin-top: -10px;">
             <div style="font-size: 11px; font-weight: 700; color: #2D5A27; margin-bottom: 4px; text-align: center; font-family: 'Inter', sans-serif;">{issue_text}</div>
-            <img src="data:image/png;base64,{img_str}" style="max-width: 140px; display: block; border-radius: 4px;">
+            <img src="data:image/jpeg;base64,{img_str}" style="max-width: 140px; display: block; border-radius: 4px;">
             <div style="position: absolute; bottom: -10px; left: 50%; transform: translateX(-50%); width: 0; height: 0; border-left: 10px solid transparent; border-right: 10px solid transparent; border-top: 10px solid #FF8C42;"></div>
         </div>
     '''
 
-# --- 6. ฟังก์ชัน Export PowerPoint ---
+# --- 6. ฟังก์ชัน Export PowerPoint (เหมือนเดิม) ---
 def create_summary_pptx(map_image_bytes, image_list):
     prs = Presentation()
     prs.slide_width, prs.slide_height = Inches(10), Inches(5.625)
@@ -152,7 +159,7 @@ def create_summary_pptx(map_image_bytes, image_list):
     prs.save(output)
     return output.getvalue()
 
-# --- 7. Streamlit UI (ธีม Minimal ส้ม+เขียว) ---
+# --- 7. Streamlit UI (คงเดิมทุกประการ) ---
 st.set_page_config(page_title="AI Cable Survey", layout="wide")
 
 st.markdown("""
@@ -238,7 +245,7 @@ joker_file_id = "1_G_r4yKyBA_vv3Nf8SdFpQ8UKv4bPLBr"
 joker_base64 = get_image_base64_from_drive(joker_file_id)
 
 if joker_base64:
-    header_html = f"""
+    header_html = f'''
         <div class="header-container">
             <div>
                 <h1 class="main-title">AI Cable Plotter</h1>
@@ -246,9 +253,9 @@ if joker_base64:
             </div>
             <img src="data:image/png;base64,{joker_base64}" class="joker-icon">
         </div>
-    """
+    '''
 else:
-    header_html = f"""
+    header_html = f'''
         <div class="header-container">
             <div>
                 <h1 class="main-title">AI Cable Plotter</h1>
@@ -256,7 +263,7 @@ else:
             </div>
             <div class="joker-icon" style="display:flex; align-items:center; justify-content:center; background:#eee; font-size:10px;">No Image</div>
         </div>
-    """
+    '''
 
 st.markdown(header_html, unsafe_allow_html=True)
 
