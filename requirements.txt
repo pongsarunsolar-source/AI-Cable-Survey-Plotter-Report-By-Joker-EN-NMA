@@ -1,11 +1,12 @@
 streamlit
-streamlit-folium
 folium
-Pillow
+streamlit-folium
+pillow
 easyocr
 numpy
-google-generativeai
+requests
 python-pptx
+google-genai
 lxml
 pandas
-requests
+xlsxwriter
