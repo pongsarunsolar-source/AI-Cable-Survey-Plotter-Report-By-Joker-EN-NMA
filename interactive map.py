@@ -12,7 +12,6 @@ import easyocr
 import numpy as np
 import re
 import requests
-import json
 from pptx import Presentation
 from pptx.util import Inches, Pt
 # ใช้ SDK ใหม่ตาม Log
@@ -20,12 +19,13 @@ from google import genai
 from google.genai import types
 import zipfile
 from lxml import etree
-import pandas as pd
+import math
 
 # แก้ไขปัญหา SSL
 ssl._create_default_https_context = ssl._create_unverified_context
 
 # --- 1. ตั้งค่า Google Gemini API (SDK ใหม่) ---
+# แนะนำ: ควรย้าย API KEY ไปไว้ใน st.secrets เพื่อความปลอดภัย
 client = genai.Client(api_key="AIzaSyBHAKfkjkb2wdzAZQZ74dFRD4Ib5Dj6cHY")
 
 @st.cache_resource
@@ -92,20 +92,48 @@ def get_lat_lon_ocr(image):
     except: pass
     return None, None
 
-# --- ฟังก์ชันใหม่: คำนวณเส้นทางเดิน (Walking) จาก OSRM ---
-def get_osrm_route(coordinates):
+# --- ฟังก์ชันใหม่ 1: หาจุดที่ไกลกันที่สุด (Head - Tail) ---
+def get_farthest_points(coordinates):
     """
-    ดึงข้อมูลเส้นทางจาก OSRM (Open Source Routing Machine)
-    Profile: Walking (เดินเท้า) - สามารถย้อนศรได้ ไม่สน One-way
-    coordinates: List of [lat, lon]
+    รับ List ของพิกัด [[lat, lon], ...]
+    คืนค่า (Start_Point, End_Point) ที่มีระยะห่างทางอากาศไกลกันที่สุด
     """
-    if len(coordinates) < 2:
+    if not coordinates or len(coordinates) < 2:
+        return None, None
+    
+    max_dist = -1
+    p1_best, p2_best = None, None
+    
+    # วนลูปหาคู่ที่ไกลที่สุด (Brute Force)
+    # เนื่องจากจำนวนจุดมักไม่เกินหลักร้อย การวน Loop แบบนี้ยังทำงานได้เร็วมาก
+    for i in range(len(coordinates)):
+        for j in range(i + 1, len(coordinates)):
+            # คำนวณระยะ Squared Euclidean คร่าวๆ เพื่อเทียบความไกล
+            lat1, lon1 = coordinates[i]
+            lat2, lon2 = coordinates[j]
+            dist = (lat1 - lat2)**2 + (lon1 - lon2)**2
+            
+            if dist > max_dist:
+                max_dist = dist
+                p1_best = coordinates[i]
+                p2_best = coordinates[j]
+                
+    return p1_best, p2_best
+
+# --- ฟังก์ชันใหม่ 2: คำนวณเส้นทางเดิน (Walking) จาก OSRM แค่หัวกับท้าย ---
+def get_osrm_route_head_tail(start_coord, end_coord):
+    """
+    ดึงข้อมูลเส้นทางจาก OSRM (Walking Profile) ระหว่างจุด 2 จุด
+    Profile 'walking' อนุญาตให้เดินย้อนศรได้และใช้เส้นทางที่รถอาจเข้าไม่ได้
+    """
+    if not start_coord or not end_coord:
         return None, 0
 
-    # OSRM รับค่าเป็น lon,lat (สลับกับ folium ที่เป็น lat,lon)
-    coords_str = ";".join([f"{lon},{lat}" for lat, lon in coordinates])
+    # OSRM รับค่าเป็น lon,lat (ต้องสลับจาก lat,lon)
+    # Format: {lon},{lat};{lon},{lat}
+    coords_str = f"{start_coord[1]},{start_coord[0]};{end_coord[1]},{end_coord[0]}"
     
-    # ใช้ Public Demo API ของ OSRM (อาจมี Rate Limit ถ้ายิงรัวๆ)
+    # ใช้ Public Demo API
     url = f"http://router.project-osrm.org/route/v1/walking/{coords_str}?overview=full&geometries=geojson"
     
     try:
@@ -229,7 +257,7 @@ st.subheader("🌐 1. ข้อมูลโครงข่าย & จุดต�
 kml_file = st.file_uploader("อัปโหลดไฟล์ KML หรือ KMZ", type=['kml', 'kmz'])
 
 kml_elements = []
-kml_points_for_route = [] # เก็บพิกัดเพื่อทำ Routing
+all_points_pool = [] # เก็บทุกจุดที่เจอ เพื่อเอาไปหา Head-Tail
 
 if kml_file:
     try:
@@ -251,9 +279,9 @@ if kml_file:
                 pts = [[float(c.split(',')[1]), float(c.split(',')[0])] for c in coords[0].strip().split()]
                 kml_elements.append({'name': final_name, 'points': pts, 'is_point': len(pts) == 1})
                 
-                # เก็บพิกัดเพื่อทำเส้นทาง (Flatten List)
+                # เก็บพิกัดลง Pool
                 for p in pts:
-                    kml_points_for_route.append(p)
+                    all_points_pool.append(p)
                     
     except Exception as e: st.error(f"Error KML: {e}")
 
@@ -263,13 +291,6 @@ st.markdown("<hr>", unsafe_allow_html=True)
 uploaded_files = st.file_uploader("📁 2. อัปโหลดรูปภาพสำรวจ", type=['jpg','jpeg','png'], accept_multiple_files=True)
 
 if 'export_data' not in st.session_state: st.session_state.export_data = []
-
-# คำนวณเส้นทางเดิน (Walking Route) เมื่อมีข้อมูล
-route_coords = None
-route_distance = 0
-
-# รวมพิกัดจากรูปภาพเข้ากับพิกัด KML เพื่อสร้างเส้นทาง
-all_route_points = kml_points_for_route.copy()
 
 if uploaded_files:
     current_hash = "".join([f.name + str(f.size) for f in uploaded_files])
@@ -289,15 +310,20 @@ if uploaded_files:
                 issue = analyze_cable_issue(raw_data) # ส่ง bytes ให้ SDK ใหม่
                 st.session_state.export_data.append({'img_obj': img_st, 'issue': issue, 'lat': lat, 'lon': lon})
         
-    # เอาพิกัดจากรูปภาพที่ process แล้วมารวมเพื่อหาเส้นทาง
+    # เอาพิกัดจากรูปภาพมารวมใน Pool
     for data in st.session_state.export_data:
-        all_route_points.append([data['lat'], data['lon']])
+        all_points_pool.append([data['lat'], data['lon']])
 
-# เรียกใช้ฟังก์ชันหาเส้นทาง ถ้ามีจุดมากกว่า 1 จุด
-if len(all_route_points) > 1:
-    # Limit จำนวนจุดเพื่อไม่ให้ URL ยาวเกินไป (เช่น 100 จุดแรก)
-    # ถ้าข้อมูลเยอะอาจต้องแบ่ง Chunk แต่เบื้องต้นเอา Simple ก่อน
-    route_coords, route_distance = get_osrm_route(all_route_points[:80])
+# --- คำนวณเส้นทาง (Routing Logic) ---
+route_coords = None
+route_distance = 0
+
+# 1. หาจุด Head - Tail (คู่ที่ไกลที่สุด)
+head_point, tail_point = get_farthest_points(all_points_pool)
+
+# 2. ถ้ามีจุดครบหัวท้าย ให้หาเส้นทางเดินถนน
+if head_point and tail_point:
+    route_coords, route_distance = get_osrm_route_head_tail(head_point, tail_point)
 
 # --- แสดงผลแผนที่ ---
 if uploaded_files or kml_elements:
@@ -308,21 +334,23 @@ if uploaded_files or kml_elements:
         control_scale=True
     )
     
-    # 1. แสดงเส้นทางถนน (Walking Route) สีน้ำเงิน
+    # แสดงเส้นทาง (ถ้ามี)
     if route_coords:
         folium.PolyLine(
             route_coords, 
             color="#007BFF", # สีฟ้า
             weight=5, 
-            opacity=0.7, 
-            dash_array='10',
-            tooltip=f"🚶 ระยะทางเดินเท้า: {route_distance:,.0f} เมตร"
+            opacity=0.8, 
+            dash_array='10, 10', # เส้นประ
+            tooltip=f"🚶 ระยะทางเดินถนน (ย้อนศรได้): {route_distance:,.0f} เมตร"
         ).add_to(m)
         
-        # แสดง Info Box บนหน้าเว็บ
-        st.info(f"📍 **ระยะทางรวมตามแนวถนน (Walking Mode - ย้อนศรได้):** {route_distance/1000:.3f} กม. ({route_distance:,.0f} เมตร)")
+        # แสดง Info Box ด้านบน
+        st.info(f"📍 **ระยะทางเดินตามถนน (Head-Tail):** {route_distance/1000:.3f} กม. ({route_distance:,.0f} เมตร)")
+    else:
+        st.warning("⚠️ ไม่พบข้อมูลพิกัดเพียงพอสำหรับคำนวณเส้นทาง")
 
-    # 2. เครื่องมือวัดระยะ (Measurement Tool) - ยังเก็บไว้สำหรับวัด Manual
+    # เครื่องมือวัดระยะ (Measurement Tool) - เผื่อไว้วัดเอง
     m.add_child(MeasureControl(
         position='topright', 
         primary_length_unit='meters', 
@@ -333,7 +361,7 @@ if uploaded_files or kml_elements:
 
     all_bounds = []
 
-    # วาด KML เดิม
+    # วาด KML (ปรับให้จางลง เพื่อให้เส้นทางคำนวณเด่นกว่า)
     for elem in kml_elements:
         if elem['is_point']:
             loc = elem['points'][0]
@@ -341,7 +369,8 @@ if uploaded_files or kml_elements:
             folium.Marker(loc, icon=folium.DivIcon(html=create_div_label(elem['name']))).add_to(m)
             all_bounds.append(loc)
         else:
-            folium.PolyLine(elem['points'], color="#FF4500", weight=4, opacity=0.5).add_to(m) # ลดความเด่นของเส้นตรงเดิมลง
+            # เส้น KML เดิม ให้จางลง
+            folium.PolyLine(elem['points'], color="gray", weight=2, opacity=0.4, dash_array='5').add_to(m)
             all_bounds.extend(elem['points'])
 
     # วาดรูปภาพจาก Session State
