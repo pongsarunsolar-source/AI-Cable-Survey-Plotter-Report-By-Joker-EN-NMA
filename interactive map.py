@@ -259,7 +259,7 @@ else:
         <div class="header-container">
             <div>
                 <h1 class="main-title">AI Cable Plotter</h1>
-                <p style="margin:0; color: #718096; font-size: 1.1rem; font-weight: 600;">Report System By Joker EN-NMA</p>
+                <p style="margin:0; color: #718096; font-size: 1.1rem; font-weight: 600;">Report  By Joker EN-NMA</p>
             </div>
             <div class="joker-icon" style="display:flex; align-items:center; justify-content:center; background:#eee; font-size:10px;">No Image</div>
         </div>
