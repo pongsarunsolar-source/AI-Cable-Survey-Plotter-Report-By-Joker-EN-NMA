@@ -36,7 +36,6 @@ def load_ocr():
 @st.cache_data
 def get_road_route(points):
     if len(points) < 2: return points, 0
-    # OSRM ขอพิกัดแบบ lon,lat;lon,lat
     coords_str = ";".join([f"{p[1]},{p[0]}" for p in points])
     url = f"http://router.project-osrm.org/route/v1/driving/{coords_str}?overview=full&geometries=geojson"
     try:
@@ -49,7 +48,7 @@ def get_road_route(points):
     except: pass
     return points, 0
 
-# --- 3. ฟังก์ชันช่วยดึงรูปภาพ Joker ---
+# --- 3. ฟังก์ชันดึงรูปภาพ Joker ---
 def get_image_base64_from_drive(file_id):
     try:
         url = f"https://drive.google.com/uc?export=download&id={file_id}"
@@ -59,7 +58,7 @@ def get_image_base64_from_drive(file_id):
     except: return None
     return None
 
-# --- 4. วิเคราะห์สาเหตุและพิกัด ---
+# --- 4. ฟังก์ชันจัดการพิกัดและ AI ---
 def analyze_cable_issue(image_bytes):
     try:
         response = client.models.generate_content(
@@ -122,12 +121,12 @@ def create_summary_pptx(map_image_bytes, image_list):
         slide1 = prs.slides.add_slide(prs.slide_layouts[6])
         slide1.shapes.add_picture(BytesIO(map_image_bytes), 0, 0, width=prs.slide_width, height=prs.slide_height)
     for i, item in enumerate(image_list[:8]):
-        if i % 8 == 0: slide = prs.slides.add_slide(prs.slide_layouts[6])
-        x, y = Inches(0.5 + (i % 4) * 2.3), Inches(0.5 + (i // 4) * 2.5)
+        slide = prs.slides.add_slide(prs.slide_layouts[6])
+        x, y = Inches(2.5), Inches(1.0)
         buf = BytesIO(); item['img_obj'].save(buf, format="JPEG")
-        slide.shapes.add_picture(buf, x, y, width=Inches(2.1), height=Inches(1.5))
-        txt = slide.shapes.add_textbox(x, y + Inches(1.5), Inches(2.1), Inches(0.5)).text_frame
-        p = txt.paragraphs[0]; p.text = f"{item['issue']}\n{item['lat']:.5f}, {item['lon']:.5f}"; p.font.size = Pt(8)
+        slide.shapes.add_picture(buf, x, y, width=Inches(5), height=Inches(3.5))
+        txt = slide.shapes.add_textbox(Inches(1), Inches(4.7), Inches(8), Inches(0.5)).text_frame
+        p = txt.paragraphs[0]; p.text = f"สาเหตุ: {item['issue']} | พิกัด: {item['lat']:.5f}, {item['lon']:.5f}"; p.font.size = Pt(14)
     output = BytesIO(); prs.save(output); return output.getvalue()
 
 # --- 6. Main App UI ---
@@ -137,6 +136,7 @@ st.markdown("""<style>
     .header-container { display: flex; align-items: center; justify-content: space-between; padding: 25px; background: white; border-radius: 24px; border-bottom: 5px solid #FF8C42; margin-bottom: 30px; }
     .main-title { background: linear-gradient(90deg, #2D5A27 0%, #FF8C42 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-weight: 800; font-size: 2.6rem; margin: 0; }
     .joker-icon { width: 100px; height: 100px; border-radius: 50%; border: 4px solid #FFFFFF; outline: 3px solid #FF8C42; }
+    .metric-card { background: white; padding: 15px; border-radius: 15px; border-left: 8px solid #2ECC71; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
 </style>""", unsafe_allow_html=True)
 
 joker_base64 = get_image_base64_from_drive("1_G_r4yKyBA_vv3Nf8SdFpQ8UKv4bPLBr")
@@ -145,6 +145,7 @@ st.markdown(f'<div class="header-container"><div><h1 class="main-title">AI Cable
 st.subheader("🌐 1. ข้อมูลโครงข่าย & จุดติดตั้ง (KML/KMZ)")
 kml_file = st.file_uploader("อัปโหลดไฟล์ KML หรือ KMZ", type=['kml', 'kmz'])
 kml_elements = []
+all_kml_pts = []
 
 if kml_file:
     try:
@@ -160,6 +161,7 @@ if kml_file:
             coords = pm.xpath('.//kml:coordinates/text() | .//earth:coordinates/text()', namespaces=ns)
             if coords:
                 pts = [[float(c.split(',')[1]), float(c.split(',')[0])] for c in coords[0].strip().split()]
+                all_kml_pts.extend(pts)
                 kml_elements.append({'name': name[0].strip() if name else "จุดสำรวจ", 'points': pts, 'is_point': len(pts) == 1})
     except: st.error("ไม่สามารถอ่านไฟล์ KML ได้")
 
@@ -171,27 +173,35 @@ if uploaded_files or kml_elements:
     all_bounds = []
     total_dist = 0.0
 
-    # ประมวลผล KML: ลากเส้นหัว-ท้าย ตามถนน
-    all_kml_pts = []
-    for elem in kml_elements:
-        if elem['is_point']:
-            folium.Marker(elem['points'][0], icon=folium.Icon(color='red')).add_to(m)
-            folium.Marker(elem['points'][0], icon=folium.DivIcon(html=create_div_label(elem['name']))).add_to(m)
-            all_bounds.append(elem['points'][0])
-        else:
-            all_kml_pts.extend(elem['points'])
-
+    # แสดงผลพิกัด มุดแรก และ มุดสุดท้าย
     if all_kml_pts:
-        with st.spinner("กำลังคำนวณเส้นทางถนนและระยะทางรวม..."):
+        first_pt = all_kml_pts[0]
+        last_pt = all_kml_pts[-1]
+        
+        col_m1, col_m2, col_m3 = st.columns(3)
+        with col_m1:
+            st.markdown(f"<div class='metric-card'><b>📍 มุดแรก (Start)</b><br>{first_pt[0]:.6f}, {first_pt[1]:.6f}</div>", unsafe_allow_html=True)
+        with col_m2:
+            st.markdown(f"<div class='metric-card' style='border-left-color: #000;'><b>🏁 มุดสุดท้าย (End)</b><br>{last_pt[0]:.6f}, {last_pt[1]:.6f}</div>", unsafe_allow_html=True)
+        
+        with st.spinner("กำลังคำนวณเส้นทางตามถนน..."):
             road_pts, dist = get_road_route(all_kml_pts)
             total_dist = dist
             folium.PolyLine(road_pts, color="#2ECC71", weight=8, opacity=0.8).add_to(m)
-            folium.Marker(road_pts[0], icon=folium.Icon(color='green', icon='play')).add_to(m)
-            folium.Marker(road_pts[-1], icon=folium.Icon(color='black', icon='stop')).add_to(m)
+            folium.Marker(first_pt, icon=folium.Icon(color='green', icon='play'), popup="START").add_to(m)
+            folium.Marker(last_pt, icon=folium.Icon(color='black', icon='stop'), popup="END").add_to(m)
             all_bounds.extend(road_pts)
+        
+        with col_m3:
+            st.markdown(f"<div class='metric-card' style='border-left-color: #FF8C42;'><b>📏 ระยะทางรวมทั้งหมด</b><br>{total_dist:.3f} กม.</div>", unsafe_allow_html=True)
 
-    st.metric("📏 ระยะทางโครงข่ายรวม (ตามแนวถนน)", f"{total_dist:.3f} กม.")
+    # วาดจุด KML อื่นๆ
+    for elem in kml_elements:
+        if elem['is_point']:
+            folium.Marker(elem['points'][0], icon=folium.DivIcon(html=create_div_label(elem['name']))).add_to(m)
+            all_bounds.append(elem['points'][0])
 
+    # ประมวลผลรูปภาพ
     if uploaded_files:
         if 'export_data' not in st.session_state: st.session_state.export_data = []
         curr_hash = hash(tuple([f.name for f in uploaded_files]))
