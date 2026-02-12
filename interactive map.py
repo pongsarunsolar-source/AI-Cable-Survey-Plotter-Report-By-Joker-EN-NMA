@@ -3,7 +3,7 @@ import os
 import streamlit as st
 import folium
 from streamlit_folium import st_folium
-from folium.plugins import MeasureControl  # <--- ส่วนที่เพิ่มเข้ามา
+from folium.plugins import MeasureControl
 from PIL import Image, ImageOps
 from PIL.ExifTags import TAGS, GPSTAGS
 import base64
@@ -12,6 +12,7 @@ import easyocr
 import numpy as np
 import re
 import requests
+import json
 from pptx import Presentation
 from pptx.util import Inches, Pt
 # ใช้ SDK ใหม่ตาม Log
@@ -90,6 +91,39 @@ def get_lat_lon_ocr(image):
         if match: return float(match.group(1)), float(match.group(2))
     except: pass
     return None, None
+
+# --- ฟังก์ชันใหม่: คำนวณเส้นทางเดิน (Walking) จาก OSRM ---
+def get_osrm_route(coordinates):
+    """
+    ดึงข้อมูลเส้นทางจาก OSRM (Open Source Routing Machine)
+    Profile: Walking (เดินเท้า) - สามารถย้อนศรได้ ไม่สน One-way
+    coordinates: List of [lat, lon]
+    """
+    if len(coordinates) < 2:
+        return None, 0
+
+    # OSRM รับค่าเป็น lon,lat (สลับกับ folium ที่เป็น lat,lon)
+    coords_str = ";".join([f"{lon},{lat}" for lat, lon in coordinates])
+    
+    # ใช้ Public Demo API ของ OSRM (อาจมี Rate Limit ถ้ายิงรัวๆ)
+    url = f"http://router.project-osrm.org/route/v1/walking/{coords_str}?overview=full&geometries=geojson"
+    
+    try:
+        r = requests.get(url, timeout=5)
+        if r.status_code == 200:
+            data = r.json()
+            if "routes" in data and len(data["routes"]) > 0:
+                route = data["routes"][0]
+                geometry = route["geometry"]["coordinates"] # [[lon, lat], ...]
+                distance = route["distance"] # เมตร
+                
+                # แปลงกลับเป็น [lat, lon] สำหรับ Folium
+                folium_coords = [[lat, lon] for lon, lat in geometry]
+                return folium_coords, distance
+    except Exception as e:
+        print(f"OSRM Error: {e}")
+    
+    return None, 0
 
 # --- 5. ฟังก์ชันสร้าง Label ชื่อสถานที่ ---
 def create_div_label(name):
@@ -195,6 +229,8 @@ st.subheader("🌐 1. ข้อมูลโครงข่าย & จุดต�
 kml_file = st.file_uploader("อัปโหลดไฟล์ KML หรือ KMZ", type=['kml', 'kmz'])
 
 kml_elements = []
+kml_points_for_route = [] # เก็บพิกัดเพื่อทำ Routing
+
 if kml_file:
     try:
         if kml_file.name.endswith('.kmz'):
@@ -214,6 +250,11 @@ if kml_file:
             if coords:
                 pts = [[float(c.split(',')[1]), float(c.split(',')[0])] for c in coords[0].strip().split()]
                 kml_elements.append({'name': final_name, 'points': pts, 'is_point': len(pts) == 1})
+                
+                # เก็บพิกัดเพื่อทำเส้นทาง (Flatten List)
+                for p in pts:
+                    kml_points_for_route.append(p)
+                    
     except Exception as e: st.error(f"Error KML: {e}")
 
 st.markdown("<hr>", unsafe_allow_html=True)
@@ -223,6 +264,42 @@ uploaded_files = st.file_uploader("📁 2. อัปโหลดรูปภา�
 
 if 'export_data' not in st.session_state: st.session_state.export_data = []
 
+# คำนวณเส้นทางเดิน (Walking Route) เมื่อมีข้อมูล
+route_coords = None
+route_distance = 0
+
+# รวมพิกัดจากรูปภาพเข้ากับพิกัด KML เพื่อสร้างเส้นทาง
+all_route_points = kml_points_for_route.copy()
+
+if uploaded_files:
+    current_hash = "".join([f.name + str(f.size) for f in uploaded_files])
+    if 'last_hash' not in st.session_state or st.session_state.last_hash != current_hash:
+        st.session_state.export_data = []
+        st.session_state.last_hash = current_hash
+
+    for i, f in enumerate(uploaded_files):
+        if i >= len(st.session_state.export_data):
+            raw_data = f.getvalue()
+            raw_img = Image.open(BytesIO(raw_data))
+            img_st = ImageOps.exif_transpose(raw_img)
+            lat, lon = get_lat_lon_exif(raw_img)
+            if lat is None: lat, lon = get_lat_lon_ocr(img_st)
+            
+            if lat:
+                issue = analyze_cable_issue(raw_data) # ส่ง bytes ให้ SDK ใหม่
+                st.session_state.export_data.append({'img_obj': img_st, 'issue': issue, 'lat': lat, 'lon': lon})
+        
+    # เอาพิกัดจากรูปภาพที่ process แล้วมารวมเพื่อหาเส้นทาง
+    for data in st.session_state.export_data:
+        all_route_points.append([data['lat'], data['lon']])
+
+# เรียกใช้ฟังก์ชันหาเส้นทาง ถ้ามีจุดมากกว่า 1 จุด
+if len(all_route_points) > 1:
+    # Limit จำนวนจุดเพื่อไม่ให้ URL ยาวเกินไป (เช่น 100 จุดแรก)
+    # ถ้าข้อมูลเยอะอาจต้องแบ่ง Chunk แต่เบื้องต้นเอา Simple ก่อน
+    route_coords, route_distance = get_osrm_route(all_route_points[:80])
+
+# --- แสดงผลแผนที่ ---
 if uploaded_files or kml_elements:
     m = folium.Map(
         location=[13.75, 100.5], zoom_start=17, 
@@ -231,19 +308,32 @@ if uploaded_files or kml_elements:
         control_scale=True
     )
     
-    # --- เพิ่มฟังก์ชันวัดระยะทาง (Measurement Tool) ---
+    # 1. แสดงเส้นทางถนน (Walking Route) สีน้ำเงิน
+    if route_coords:
+        folium.PolyLine(
+            route_coords, 
+            color="#007BFF", # สีฟ้า
+            weight=5, 
+            opacity=0.7, 
+            dash_array='10',
+            tooltip=f"🚶 ระยะทางเดินเท้า: {route_distance:,.0f} เมตร"
+        ).add_to(m)
+        
+        # แสดง Info Box บนหน้าเว็บ
+        st.info(f"📍 **ระยะทางรวมตามแนวถนน (Walking Mode - ย้อนศรได้):** {route_distance/1000:.3f} กม. ({route_distance:,.0f} เมตร)")
+
+    # 2. เครื่องมือวัดระยะ (Measurement Tool) - ยังเก็บไว้สำหรับวัด Manual
     m.add_child(MeasureControl(
         position='topright', 
         primary_length_unit='meters', 
         secondary_length_unit='kilometers',
-        primary_area_unit='sqmeters',
         active_color='#FF8C42',
         completed_color='#2D5A27'
     ))
-    # ------------------------------------------------
 
     all_bounds = []
 
+    # วาด KML เดิม
     for elem in kml_elements:
         if elem['is_point']:
             loc = elem['points'][0]
@@ -251,32 +341,14 @@ if uploaded_files or kml_elements:
             folium.Marker(loc, icon=folium.DivIcon(html=create_div_label(elem['name']))).add_to(m)
             all_bounds.append(loc)
         else:
-            folium.PolyLine(elem['points'], color="#FF4500", weight=6, opacity=0.8).add_to(m)
+            folium.PolyLine(elem['points'], color="#FF4500", weight=4, opacity=0.5).add_to(m) # ลดความเด่นของเส้นตรงเดิมลง
             all_bounds.extend(elem['points'])
 
-    if uploaded_files:
-        current_hash = "".join([f.name + str(f.size) for f in uploaded_files])
-        if 'last_hash' not in st.session_state or st.session_state.last_hash != current_hash:
-            st.session_state.export_data = []
-            st.session_state.last_hash = current_hash
-
-        for i, f in enumerate(uploaded_files):
-            if i >= len(st.session_state.export_data):
-                raw_data = f.getvalue()
-                raw_img = Image.open(BytesIO(raw_data))
-                img_st = ImageOps.exif_transpose(raw_img)
-                lat, lon = get_lat_lon_exif(raw_img)
-                if lat is None: lat, lon = get_lat_lon_ocr(img_st)
-                
-                if lat:
-                    issue = analyze_cable_issue(raw_data) # ส่ง bytes ให้ SDK ใหม่
-                    st.session_state.export_data.append({'img_obj': img_st, 'issue': issue, 'lat': lat, 'lon': lon})
-            
-            if i < len(st.session_state.export_data):
-                data = st.session_state.export_data[i]
-                icon_html = img_to_custom_icon(data['img_obj'], data['issue'])
-                folium.Marker([data['lat'], data['lon']], icon=folium.DivIcon(html=icon_html)).add_to(m)
-                all_bounds.append([data['lat'], data['lon']])
+    # วาดรูปภาพจาก Session State
+    for data in st.session_state.export_data:
+        icon_html = img_to_custom_icon(data['img_obj'], data['issue'])
+        folium.Marker([data['lat'], data['lon']], icon=folium.DivIcon(html=icon_html)).add_to(m)
+        all_bounds.append([data['lat'], data['lon']])
 
     if all_bounds: m.fit_bounds(all_bounds, padding=[50, 50])
     st_folium(m, height=900, use_container_width=True, key="survey_map")
