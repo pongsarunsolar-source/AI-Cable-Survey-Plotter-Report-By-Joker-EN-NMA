@@ -9,4 +9,3 @@ python-pptx
 google-genai
 lxml
 pandas
-xlsxwriter
