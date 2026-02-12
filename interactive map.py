@@ -3,6 +3,7 @@ import os
 import streamlit as st
 import folium
 from streamlit_folium import st_folium
+from folium.plugins import MeasureControl  # <--- ส่วนที่เพิ่มเข้ามา
 from PIL import Image, ImageOps
 from PIL.ExifTags import TAGS, GPSTAGS
 import base64
@@ -229,6 +230,18 @@ if uploaded_files or kml_elements:
         attr="Google",
         control_scale=True
     )
+    
+    # --- เพิ่มฟังก์ชันวัดระยะทาง (Measurement Tool) ---
+    m.add_child(MeasureControl(
+        position='topright', 
+        primary_length_unit='meters', 
+        secondary_length_unit='kilometers',
+        primary_area_unit='sqmeters',
+        active_color='#FF8C42',
+        completed_color='#2D5A27'
+    ))
+    # ------------------------------------------------
+
     all_bounds = []
 
     for elem in kml_elements:
@@ -279,4 +292,3 @@ if uploaded_files or kml_elements:
             if st.button("🚀 สรุปรายงานและดาวน์โหลดไฟล์ PPTX"):
                 pptx_data = create_summary_pptx(map_cap.getvalue(), st.session_state.export_data)
                 st.download_button("📥 คลิกเพื่อดาวน์โหลดรายงาน", data=pptx_data, file_name="Cable_AI_Report.pptx")
-
