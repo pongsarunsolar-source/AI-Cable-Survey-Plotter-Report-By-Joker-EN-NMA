@@ -13,6 +13,7 @@ import re
 import requests
 from pptx import Presentation
 from pptx.util import Inches, Pt
+# ใช้ SDK ใหม่ตาม Log
 from google import genai
 from google.genai import types
 import zipfile
@@ -22,49 +23,43 @@ import pandas as pd
 # แก้ไขปัญหา SSL
 ssl._create_default_https_context = ssl._create_unverified_context
 
-# --- 1. ตั้งค่า Google Gemini API ---
+# --- 1. ตั้งค่า Google Gemini API (SDK ใหม่) ---
 client = genai.Client(api_key="AIzaSyBHAKfkjkb2wdzAZQZ74dFRD4Ib5Dj6cHY")
 
 @st.cache_resource
 def load_ocr():
+    # บังคับเก็บโมเดลในโฟลเดอร์โปรเจกต์ ลดปัญหา Download นานแล้วค้าง
     model_path = os.path.join(os.getcwd(), "easyocr_models")
     if not os.path.exists(model_path):
         os.makedirs(model_path)
     return easyocr.Reader(['en'], gpu=False, model_storage_directory=model_path)
 
-# --- 2. ฟังก์ชันคำนวณระยะทางเดินเท้า (OSRM) ---
-def get_walking_distance(start_lat, start_lon, end_lat, end_lon):
-    try:
-        url = f"http://router.project-osrm.org/route/v1/foot/{start_lon},{start_lat};{end_lon},{end_lat}?overview=full&geometries=geojson"
-        response = requests.get(url, timeout=5)
-        data = response.json()
-        if data['code'] == 'Ok':
-            distance = data['routes'][0]['distance']
-            geometry = data['routes'][0]['geometry']['coordinates']
-            route_points = [[coord[1], coord[0]] for coord in geometry]
-            return distance, route_points
-    except: pass
-    return None, None
-
-# --- ฟังก์ชันช่วยอื่นๆ (Exif, OCR, Icon, PPTX) คงเดิมไว้ตามโครงสร้างหลักของคุณ ---
+# --- 2. ฟังก์ชันช่วยดึงรูปภาพ Joker ---
 def get_image_base64_from_drive(file_id):
     try:
         url = f"https://drive.google.com/uc?export=download&id={file_id}"
         response = requests.get(url, timeout=10)
-        if response.status_code == 200: return base64.b64encode(response.content).decode()
-    except: return None
+        if response.status_code == 200:
+            return base64.b64encode(response.content).decode()
+    except Exception: return None
     return None
 
+# --- 3. ฟังก์ชันวิเคราะห์สาเหตุด้วย AI ---
 def analyze_cable_issue(image_bytes):
     try:
         response = client.models.generate_content(
             model="gemini-1.5-flash",
-            contents=["""วิเคราะห์รูปภาพสายเคเบิลนี้และเลือกตอบเฉพาะชื่อสาเหตุภาษาไทย: 1. cable ตกพื้น | 2. หัวต่ออยู่กลาง span เสาไฟฟ้า | 3. ไฟไหม้ cable | 4. หัวต่อขวดน้ำ""",
-                      types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg")]
+            contents=[
+                """วิเคราะห์รูปภาพสายเคเบิลนี้และเลือกตอบเพียง "หนึ่งเดียว" จาก 4 สาเหตุ:
+                1. cable ตกพื้น | 2. หัวต่ออยู่กลาง span เสาไฟฟ้า | 3. ไฟไหม้ cable | 4. หัวต่อขวดน้ำ
+                ตอบเฉพาะชื่อสาเหตุภาษาไทยเท่านั้น""",
+                types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg")
+            ]
         )
         return response.text.strip()
     except: return "วิเคราะห์ไม่ได้"
 
+# --- 4. ฟังก์ชันจัดการพิกัด ---
 def get_lat_lon_exif(image):
     try:
         exif = image._getexif()
@@ -84,8 +79,10 @@ def get_lat_lon_exif(image):
 
 def get_lat_lon_ocr(image):
     try:
-        reader = load_ocr()
-        img_np = np.array(image.convert('RGB'))
+        reader = load_ocr() # โหลดเมื่อจะใช้งานจริง
+        img_for_ocr = image.copy()
+        img_for_ocr.thumbnail((1000, 1000)) 
+        img_np = np.array(img_for_ocr)
         results = reader.readtext(img_np, paragraph=True)
         full_text = " ".join([res[1] for res in results])
         match = re.search(r'(\d+\.\d+)\s*[nN]\s+(\d+\.\d+)\s*[eE]', full_text)
@@ -93,122 +90,193 @@ def get_lat_lon_ocr(image):
     except: pass
     return None, None
 
+# --- 5. ฟังก์ชันสร้าง Label ชื่อสถานที่ ---
 def create_div_label(name):
-    return f'<div style="font-size: 11px; font-weight: 800; color: #D9534F; white-space: nowrap; transform: translate(-50%, -150%); text-shadow: 2px 2px 4px white;">{name}</div>'
+    return f'''
+        <div style="
+            font-size: 11px; font-weight: 800; color: #D9534F; white-space: nowrap;
+            transform: translate(-50%, -150%); background-color: transparent;
+            border: none; box-shadow: none;
+            text-shadow: 2px 2px 4px white, -2px -2px 4px white, 2px -2px 4px white, -2px 2px 4px white;
+            font-family: 'Inter', sans-serif;
+        ">
+            {name}
+        </div>
+    '''
 
+# --- 6. ฟังก์ชันสร้าง Icon สำหรับรูปถ่ายบนแผนที่ ---
 def img_to_custom_icon(img, issue_text):
     img_resized = img.copy()
-    img_resized.thumbnail((150, 150))
+    img_resized.thumbnail((150, 150)) 
     buf = BytesIO()
     img_resized.save(buf, format="JPEG", quality=70)
     img_str = base64.b64encode(buf.getvalue()).decode()
-    return f'''<div style="position: relative; background: white; padding: 5px; border-radius: 12px; border: 2px solid #FF8C42; transform: translate(-50%, -100%);">
-                <div style="font-size: 11px; font-weight: 700; color: #2D5A27; text-align: center;">{issue_text}</div>
-                <img src="data:image/jpeg;base64,{img_str}" style="max-width: 140px; border-radius: 4px;">
-              </div>'''
+    return f'''
+        <div style="position: relative; width: fit-content; background-color: white; padding: 5px; border-radius: 12px; box-shadow: 0px 8px 24px rgba(0,0,0,0.12); border: 2px solid #FF8C42; transform: translate(-50%, -100%); margin-top: -10px;">
+            <div style="font-size: 11px; font-weight: 700; color: #2D5A27; margin-bottom: 4px; text-align: center;">{issue_text}</div>
+            <img src="data:image/jpeg;base64,{img_str}" style="max-width: 140px; display: block; border-radius: 4px;">
+            <div style="position: absolute; bottom: -10px; left: 50%; transform: translateX(-50%); width: 0; height: 0; border-left: 10px solid transparent; border-right: 10px solid transparent; border-top: 10px solid #FF8C42;"></div>
+        </div>
+    '''
 
-def create_summary_pptx(map_image_bytes, image_list, dist_text):
+# --- 7. ฟังก์ชัน Export PowerPoint ---
+def create_summary_pptx(map_image_bytes, image_list):
     prs = Presentation()
     prs.slide_width, prs.slide_height = Inches(10), Inches(5.625)
+    
     if map_image_bytes:
-        slide = prs.slides.add_slide(prs.slide_layouts[6])
-        slide.shapes.add_picture(BytesIO(map_image_bytes), 0, 0, width=prs.slide_width, height=prs.slide_height)
-        tb = slide.shapes.add_textbox(Inches(0.2), Inches(0.2), Inches(4), Inches(0.5))
-        tb.text_frame.text = f"ระยะทางหัว-ท้าย (KML): {dist_text}"
-    output = BytesIO(); prs.save(output); return output.getvalue()
+        slide1 = prs.slides.add_slide(prs.slide_layouts[6])
+        slide1.shapes.add_picture(BytesIO(map_image_bytes), 0, 0, width=prs.slide_width, height=prs.slide_height)
 
-# --- 10. UI Layout ---
+    if image_list:
+        slide2 = prs.slides.add_slide(prs.slide_layouts[6])
+        cols, rows = 4, 2
+        img_w, img_h = Inches(2.1), Inches(1.5)
+        margin_x = (prs.slide_width - (img_w * cols)) / (cols + 1)
+        margin_y = (prs.slide_height - (img_h * rows + Inches(1.0))) / (rows + 1)
+
+        for i, item in enumerate(image_list[:8]):
+            curr_row, curr_col = i // cols, i % cols
+            x = margin_x + (curr_col * (img_w + margin_x))
+            y = margin_y + (curr_row * (img_h + margin_y + Inches(0.5)))
+            
+            image = item['img_obj'].copy()
+            target_ratio = img_w / img_h
+            w_px, h_px = image.size
+            if (w_px/h_px) > target_ratio:
+                new_w = h_px * target_ratio
+                left = (w_px - new_w) / 2
+                image = image.crop((left, 0, left + new_w, h_px))
+            else:
+                new_h = w_px / target_ratio
+                top = (h_px - new_h) / 2
+                image = image.crop((0, top, w_px, top + new_h))
+            
+            buf = BytesIO()
+            image.save(buf, format="JPEG")
+            buf.seek(0)
+            slide2.shapes.add_picture(buf, x, y, width=img_w, height=img_h)
+            
+            txt_box = slide2.shapes.add_textbox(x, y + img_h + Inches(0.05), img_w, Inches(0.6))
+            tf = txt_box.text_frame
+            tf.word_wrap = True
+            p1 = tf.paragraphs[0]
+            p1.text = f"สาเหตุ: {item['issue']}"
+            p1.font.size = Pt(8)
+            p1.font.bold = True
+            p2 = tf.add_paragraph()
+            p2.text = f"Lat: {item['lat']:.5f}\nLong: {item['lon']:.5f}"
+            p2.font.size = Pt(7)
+
+    output = BytesIO()
+    prs.save(output)
+    return output.getvalue()
+
+# --- 8. UI Layout ---
 st.set_page_config(page_title="AI Cable Survey", layout="wide")
-st.markdown("""<style> .stApp { background: #FFF5ED; } .main-title { font-weight: 800; font-size: 2.6rem; color: #2D5A27; } </style>""", unsafe_allow_html=True)
+st.markdown("""<style>
+    .stApp { background: linear-gradient(120deg, #FFF5ED 0%, #F0F9F1 100%); }
+    .header-container { display: flex; align-items: center; justify-content: space-between; padding: 25px; background: white; border-radius: 24px; border-bottom: 5px solid #FF8C42; margin-bottom: 30px; }
+    .main-title { background: linear-gradient(90deg, #2D5A27 0%, #FF8C42 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-weight: 800; font-size: 2.6rem; margin: 0; }
+    .joker-icon { width: 100px; height: 100px; object-fit: cover; border-radius: 50%; border: 4px solid #FFFFFF; outline: 3px solid #FF8C42; }
+    .stButton>button { background: #2D5A27; color: white; border-radius: 14px; padding: 12px 35px; font-weight: 600; }
+    .stButton>button:hover { background: #FF8C42; color: white; }
+</style>""", unsafe_allow_html=True)
 
 # Header
 joker_base64 = get_image_base64_from_drive("1_G_r4yKyBA_vv3Nf8SdFpQ8UKv4bPLBr")
-st.markdown(f"<div><h1 class='main-title'>AI Cable Plotter</h1><p>By Joker EN-NMA</p></div>", unsafe_allow_html=True)
+header_html = f'''<div class="header-container"><div><h1 class="main-title">AI Cable Plotter</h1><p style="margin:0; color: #718096; font-weight: 600;">By Joker EN-NMA</p></div>
+{"<img src='data:image/png;base64,"+joker_base64+"' class='joker-icon'>" if joker_base64 else ""}</div>'''
+st.markdown(header_html, unsafe_allow_html=True)
 
-# --- 11. ส่วนจัดการ KML และระยะทาง ---
-st.subheader("🌐 1. ข้อมูลโครงข่าย (KML/KMZ)")
-kml_file = st.file_uploader("อัปโหลด KML/KMZ เพื่อคำนวณระยะหัว-ท้าย", type=['kml', 'kmz'])
+# --- 9. เมนู KML/KMZ ---
+st.subheader("🌐 1. ข้อมูลโครงข่าย & จุดติดตั้ง (KML/KMZ)")
+kml_file = st.file_uploader("อัปโหลดไฟล์ KML หรือ KMZ", type=['kml', 'kmz'])
 
-kml_points = []
 kml_elements = []
-
 if kml_file:
     try:
         if kml_file.name.endswith('.kmz'):
             with zipfile.ZipFile(kml_file) as z:
                 kml_filename = [n for n in z.namelist() if n.endswith('.kml')][0]
                 content = z.read(kml_filename)
-        else: content = kml_file.getvalue()
-        
+        else:
+            content = kml_file.getvalue()
         root = etree.fromstring(content)
-        ns = {'kml': 'http://www.opengis.net/kml/2.2', 'earth': 'http://earth.google.com/kml/2.2'}
+        ns = {'kml': 'http://www.opengis.net/kml/2.2', 'mwm': 'https://maps.me', 'earth': 'http://earth.google.com/kml/2.2'}
         placemarks = root.xpath('.//kml:Placemark | .//earth:Placemark', namespaces=ns)
-        
         for pm in placemarks:
+            name_node = pm.xpath('kml:name/text() | earth:name/text()', namespaces=ns)
+            custom_name = pm.xpath('.//mwm:customName/mwm:lang[@code="default"]/text()', namespaces=ns)
+            final_name = custom_name[0].strip() if custom_name else (name_node[0].strip() if name_node else "ไม่ระบุชื่อ")
             coords = pm.xpath('.//kml:coordinates/text() | .//earth:coordinates/text()', namespaces=ns)
             if coords:
-                # เก็บเฉพาะพิกัดแรกของแต่ละ Placemark
-                raw_coord = coords[0].strip().split()[0].split(',')
-                lat, lon = float(raw_coord[1]), float(raw_coord[0])
-                kml_points.append([lat, lon])
-                
-                name_node = pm.xpath('kml:name/text()', namespaces=ns)
-                name = name_node[0] if name_node else "Point"
-                kml_elements.append({'name': name, 'loc': [lat, lon]})
-    except Exception as e: st.error(f"Error: {e}")
+                pts = [[float(c.split(',')[1]), float(c.split(',')[0])] for c in coords[0].strip().split()]
+                kml_elements.append({'name': final_name, 'points': pts, 'is_point': len(pts) == 1})
+    except Exception as e: st.error(f"Error KML: {e}")
 
-# --- 12. คำนวณระยะทางจาก KML ---
-kml_dist_text = "0 เมตร"
-kml_route = []
+st.markdown("<hr>", unsafe_allow_html=True)
 
-if len(kml_points) >= 2:
-    # จุดแรกสุด และ จุดท้ายสุด ในไฟล์
-    start_pt = kml_points[0]
-    end_pt = kml_points[-1]
-    
-    dist, route = get_walking_distance(start_pt[0], start_pt[1], end_pt[0], end_pt[1])
-    if dist:
-        kml_dist_text = f"{dist:.2f} เมตร"
-        kml_route = route
-        st.sidebar.success(f"📏 ระยะหัว-ท้าย KML: {kml_dist_text}")
-        st.sidebar.info(f"จาก: {kml_elements[0]['name']}\nถึง: {kml_elements[-1]['name']}")
-
-# --- 13. แสดงแผนที่และรูปภาพ ---
+# --- 10. ส่วนการทำงานหลัก (Map & Export) ---
 uploaded_files = st.file_uploader("📁 2. อัปโหลดรูปภาพสำรวจ", type=['jpg','jpeg','png'], accept_multiple_files=True)
 
-m = folium.Map(location=[13.75, 100.5], zoom_start=15, tiles="https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}", attr="Google")
-all_bounds = []
+if 'export_data' not in st.session_state: st.session_state.export_data = []
 
-# วาดจุด KML และเส้นทางเดินเท้า
-if kml_elements:
-    for i, elem in enumerate(kml_elements):
-        color = 'red' if (i==0 or i==len(kml_elements)-1) else 'blue'
-        folium.Marker(elem['loc'], icon=folium.Icon(color=color)).add_to(m)
-        folium.Marker(elem['loc'], icon=folium.DivIcon(html=create_div_label(elem['name']))).add_to(m)
-        all_bounds.append(elem['loc'])
-    
-    if kml_route:
-        folium.PolyLine(kml_route, color="#2D5A27", weight=5, opacity=0.7, tooltip=f"ระยะทาง: {kml_dist_text}").add_to(m)
+if uploaded_files or kml_elements:
+    m = folium.Map(
+        location=[13.75, 100.5], zoom_start=17, 
+        tiles="https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}", 
+        attr="Google",
+        control_scale=True
+    )
+    all_bounds = []
 
-# จัดการรูปภาพสำรวจ
-if uploaded_files:
-    if 'export_data' not in st.session_state: st.session_state.export_data = []
-    # (ส่วนประมวลผลรูปภาพ Gemini/OCR เหมือนโค้ดเดิมของคุณ)
-    for f in uploaded_files:
-        raw_data = f.getvalue()
-        img = ImageOps.exif_transpose(Image.open(BytesIO(raw_data)))
-        lat, lon = get_lat_lon_exif(img)
-        if lat:
-            issue = analyze_cable_issue(raw_data)
-            icon_html = img_to_custom_icon(img, issue)
-            folium.Marker([lat, lon], icon=folium.DivIcon(html=icon_html)).add_to(m)
-            all_bounds.append([lat, lon])
+    for elem in kml_elements:
+        if elem['is_point']:
+            loc = elem['points'][0]
+            folium.Marker(loc, icon=folium.Icon(color='red', icon='info-sign')).add_to(m)
+            folium.Marker(loc, icon=folium.DivIcon(html=create_div_label(elem['name']))).add_to(m)
+            all_bounds.append(loc)
+        else:
+            folium.PolyLine(elem['points'], color="#FF4500", weight=6, opacity=0.8).add_to(m)
+            all_bounds.extend(elem['points'])
 
-if all_bounds: m.fit_bounds(all_bounds)
-st_folium(m, height=700, use_container_width=True)
+    if uploaded_files:
+        current_hash = "".join([f.name + str(f.size) for f in uploaded_files])
+        if 'last_hash' not in st.session_state or st.session_state.last_hash != current_hash:
+            st.session_state.export_data = []
+            st.session_state.last_hash = current_hash
 
-# ส่วน Export PPTX
-if st.button("🚀 สรุปรายงาน PPTX"):
-    # ดึงรูปแผนที่จากไฟล์ที่อัปโหลด (ถ้ามี)
-    pptx_data = create_summary_pptx(None, None, kml_dist_text)
-    st.download_button("📥 ดาวน์โหลดรายงาน", data=pptx_data, file_name="Report.pptx")
+        for i, f in enumerate(uploaded_files):
+            if i >= len(st.session_state.export_data):
+                raw_data = f.getvalue()
+                raw_img = Image.open(BytesIO(raw_data))
+                img_st = ImageOps.exif_transpose(raw_img)
+                lat, lon = get_lat_lon_exif(raw_img)
+                if lat is None: lat, lon = get_lat_lon_ocr(img_st)
+                
+                if lat:
+                    issue = analyze_cable_issue(raw_data) # ส่ง bytes ให้ SDK ใหม่
+                    st.session_state.export_data.append({'img_obj': img_st, 'issue': issue, 'lat': lat, 'lon': lon})
+            
+            if i < len(st.session_state.export_data):
+                data = st.session_state.export_data[i]
+                icon_html = img_to_custom_icon(data['img_obj'], data['issue'])
+                folium.Marker([data['lat'], data['lon']], icon=folium.DivIcon(html=icon_html)).add_to(m)
+                all_bounds.append([data['lat'], data['lon']])
+
+    if all_bounds: m.fit_bounds(all_bounds, padding=[50, 50])
+    st_folium(m, height=900, use_container_width=True, key="survey_map")
+
+    st.markdown("<hr>", unsafe_allow_html=True)
+    st.subheader("📄 3. สร้างรายงาน PowerPoint")
+    col1, col2 = st.columns([1, 1])
+    with col1:
+        map_cap = st.file_uploader("อัปโหลดรูป Capture แผนที่", type=['jpg','png'])
+    if map_cap and st.session_state.export_data:
+        with col2:
+            st.write("")
+            if st.button("🚀 สรุปรายงานและดาวน์โหลดไฟล์ PPTX"):
+                pptx_data = create_summary_pptx(map_cap.getvalue(), st.session_state.export_data)
+                st.download_button("📥 คลิกเพื่อดาวน์โหลดรายงาน", data=pptx_data, file_name="Cable_AI_Report.pptx")
+
