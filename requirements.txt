@@ -4,8 +4,8 @@ folium
 Pillow
 easyocr
 numpy
-requests
-python-pptx
 google-generativeai
-fastkml
-pygeoif
+python-pptx
+lxml
+pandas
+requests
