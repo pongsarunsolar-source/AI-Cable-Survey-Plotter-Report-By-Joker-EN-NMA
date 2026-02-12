@@ -1,4 +1,4 @@
--import ssl
+import ssl
 import os
 import streamlit as st
 import folium
