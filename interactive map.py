@@ -247,7 +247,7 @@ header_html = f'''<div class="header-container"><div><h1 class="main-title">AI C
 st.markdown(header_html, unsafe_allow_html=True)
 
 # --- 9. เมนู KML/KMZ ---
-st.subheader("🌐 1. ข้อมูลโครงข่าย & จุดติดตั้ง (KML/KMZ)")
+st.subheader("🌐 1. Upload File (KML/KMZ)")
 kml_file = st.file_uploader("อัปโหลดไฟล์ KML หรือ KMZ", type=['kml', 'kmz'])
 
 kml_elements = []
@@ -382,3 +382,4 @@ if uploaded_files or kml_elements:
             if st.button("🚀 สรุปรายงานและดาวน์โหลดไฟล์ PPTX"):
                 pptx_data = create_summary_pptx(map_cap.getvalue(), st.session_state.export_data)
                 st.download_button("📥 คลิกเพื่อดาวน์โหลดรายงาน", data=pptx_data, file_name="Cable_AI_Report.pptx")
+
