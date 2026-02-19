@@ -43,7 +43,7 @@ def get_image_base64_from_drive(file_id):
     except Exception: return None
     return None
 
-# --- 3. ฟังก์ชันวิเคราะห์สาเหตุด้วย AI (Default: cable ตกพื้น) ---
+# --- 3. ฟังก์ชันวิเคราะห์สาเหตุด้วย AI ---
 def analyze_cable_issue(image_bytes):
     try:
         response = client.models.generate_content(
@@ -174,7 +174,7 @@ def img_to_custom_icon(img, issue_text):
         </div>
     '''
 
-# --- 7. ฟังก์ชันสร้างรายงาน PowerPoint (เพิ่ม Title หน้า 2 และ 3) ---
+# --- 7. ฟังก์ชันสร้างรายงาน PowerPoint (ปรับปรุงตำแหน่งรูปและ Title หน้า 2) ---
 def create_summary_pptx(map_image_bytes, image_list, cable_type, route_distance, issue_kml_elements):
     prs = Presentation()
     prs.slide_width, prs.slide_height = Inches(10), Inches(5.625)
@@ -197,14 +197,18 @@ def create_summary_pptx(map_image_bytes, image_list, cable_type, route_distance,
     for el in issue_kml_elements[:10]:
         p_el = tf.add_paragraph(); p_el.text = f"  - {el['name']} (Lat: {el['points'][0][0]:.5f}, Long: {el['points'][0][1]:.5f})"; p_el.font.size = Pt(12)
 
-    # --- หน้าที่ 2: ภาพแสดงแผนที่ ---
+    # --- หน้าที่ 2: ภาพแสดงแผนที่ (ปรับปรุง: ภาพเต็มหน้า + Title มุมบนซ้าย) ---
     if map_image_bytes:
         slide1 = prs.slides.add_slide(prs.slide_layouts[6])
-        title_box1 = slide1.shapes.add_textbox(Inches(0.5), Inches(0.2), Inches(9), Inches(0.5))
-        p_title1 = title_box1.text_frame.paragraphs[0]; p_title1.text = "ภาพแสดงแผนที่"; p_title1.font.bold, p_title1.font.size = True, Pt(20)
-        slide1.shapes.add_picture(BytesIO(map_image_bytes), 0, Inches(0.8), width=prs.slide_width, height=Inches(4.825))
+        # 1. วางรูปให้เต็มหน้าจอ
+        slide1.shapes.add_picture(BytesIO(map_image_bytes), 0, 0, width=prs.slide_width, height=prs.slide_height)
+        # 2. วาง Title ไว้บนรูปภาพที่ตำแหน่งมุมบนซ้าย
+        title_box1 = slide1.shapes.add_textbox(Inches(0.2), Inches(0.1), Inches(4), Inches(0.5))
+        p_title1 = title_box1.text_frame.paragraphs[0]
+        p_title1.text = "ภาพแสดงแผนที่"
+        p_title1.font.bold, p_title1.font.size = True, Pt(24)
         
-    # --- หน้าที่ 3: รูปภาพแสดงจุดที่มีปัญหา ---
+    # --- หน้าที่ 3: รูปภาพแสดงจุดที่มีปัญหา (Title ด้านบน) ---
     if image_list:
         slide2 = prs.slides.add_slide(prs.slide_layouts[6])
         title_box2 = slide2.shapes.add_textbox(Inches(0.5), Inches(0.2), Inches(9), Inches(0.5))
@@ -232,8 +236,7 @@ def create_summary_pptx(map_image_bytes, image_list, cable_type, route_distance,
             buf = BytesIO(); image.save(buf, format="JPEG"); buf.seek(0)
             slide2.shapes.add_picture(buf, x, y, width=img_w, height=img_h)
             txt_box = slide2.shapes.add_textbox(x, y + img_h + Inches(0.05), img_w, Inches(0.6))
-            tf_img = txt_box.text_frame
-            tf_img.word_wrap = True
+            tf_img = txt_box.text_frame; tf_img.word_wrap = True
             p_iss = tf_img.paragraphs[0]; p_iss.text = f"สาเหตุ: {item['issue']}"; p_iss.font.size = Pt(8); p_iss.font.bold = True
             p_lat = tf_img.add_paragraph(); p_lat.text = f"Lat: {item['lat']:.5f}\nLong: {item['lon']:.5f}"; p_lat.font.size = Pt(7)
             
@@ -269,8 +272,6 @@ if kml_file:
     kml_elements, kml_points_pool = parse_kml_data(kml_file)
     for el in kml_elements: zoom_bounds.extend(el['points'])
 
-st.markdown("<hr>", unsafe_allow_html=True)
-
 # --- 10. ส่วนรูปภาพสำรวจ ---
 st.subheader("📁 2. อัปโหลดรูปภาพสำรวจ")
 uploaded_files = st.file_uploader("ลากและวางไฟล์ที่นี่", type=['jpg','jpeg','png'], accept_multiple_files=True, key="survey_uploader")
@@ -289,11 +290,10 @@ if uploaded_files:
             if lat is None: lat, lon = get_lat_lon_ocr(img_st)
             if lat:
                 issue = analyze_cable_issue(raw_data)
-                storage_img = img_st.copy()
-                storage_img.thumbnail((1200, 1200))
+                storage_img = img_st.copy(); storage_img.thumbnail((1200, 1200))
                 st.session_state.export_data.append({'img_obj': storage_img, 'issue': issue, 'lat': lat, 'lon': lon})
 
-for data in st.session_state.export_data: zoom_bounds.append([data['lat'], data['lon']])
+for d in st.session_state.export_data: zoom_bounds.append([d['lat'], d['lon']])
 
 route_coords, route_distance = None, 0
 if kml_points_pool:
