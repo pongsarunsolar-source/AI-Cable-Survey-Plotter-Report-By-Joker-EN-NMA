@@ -146,7 +146,7 @@ def get_osrm_route_head_tail(start_coord, end_coord):
     except: pass
     return None, 0
 
-# --- 6. ฟังก์ชันสร้าง Label ชื่อสถานที่ ---
+# --- 6. ฟังก์ชันสร้าง Label ชื่อ ---
 def create_div_label(name, color="#D9534F"):
     return f'''
         <div style="
@@ -224,14 +224,14 @@ header_html = f'''<div class="header-container"><div><h1 class="main-title">AI C
 {"<img src='data:image/png;base64,"+joker_base64+"' class='joker-icon'>" if joker_base64 else ""}</div>'''
 st.markdown(header_html, unsafe_allow_html=True)
 
-# --- 9. เมนู KML/KMZ (ปรับตำแหน่งตามความต้องการ) ---
+# --- 9. เมนู KML/KMZ (ปรับคำศัพท์ตามความต้องการ) ---
 st.subheader("🌐 1. ข้อมูลโครงข่าย & จุดติดตั้ง (KML/KMZ)")
 
-# ชุดเสริมอยู่บน
-kml_file_yellow = st.file_uploader("อัปโหลดชุดเสริม - Overall (ภาพรวมแผนที่)", type=['kml', 'kmz'])
+# ส่วนที่ 1: ชุดเสริม (สีเหลือง) อยู่บน
+kml_file_yellow = st.file_uploader("Import KMZ - Overall (ภาพรวมแผนที่)", type=['kml', 'kmz'])
 
-# ชุดหลักอยู่ล่าง
-kml_file = st.file_uploader("อัปโหลดชุดหลัก - พิกัดที่มีปัญหาและเสนอคร่อม cable", type=['kml', 'kmz'])
+# ส่วนที่ 2: ชุดหลัก (สีแดง) อยู่ล่าง
+kml_file = st.file_uploader("Import KMZ - พิกัดที่มีปัญหาและเสนอคร่อม cable", type=['kml', 'kmz'])
 
 kml_elements = []
 kml_points_pool = []
@@ -248,7 +248,7 @@ if kml_file:
 
 st.markdown("<hr>", unsafe_allow_html=True)
 
-# --- 10. รูปภาพสำรวจ ---
+# --- 10. ส่วนรูปภาพสำรวจ ---
 uploaded_files = st.file_uploader("📁 2. อัปโหลดรูปภาพสำรวจ", type=['jpg','jpeg','png'], accept_multiple_files=True)
 if 'export_data' not in st.session_state: st.session_state.export_data = []
 
@@ -283,7 +283,7 @@ if uploaded_files or kml_elements or yellow_elements:
         folium.PolyLine(route_coords, color="#007BFF", weight=5, opacity=0.8, dash_array='10, 10').add_to(m)
         st.info(f"📍 ระยะทางชุดหลัก: {route_distance/1000:.3f} กม. ({route_distance:,.0f} เมตร)")
 
-    # 1. วาดชุด Overall (สีเหลือง) พร้อมชื่อ
+    # 1. วาดชุด Overall (สีเหลือง) พร้อมแสดงชื่อจุด
     for elem in yellow_elements:
         if elem['is_point']:
             loc = elem['points'][0]
@@ -292,7 +292,7 @@ if uploaded_files or kml_elements or yellow_elements:
         else:
             folium.PolyLine(elem['points'], color="#FFD700", weight=4, opacity=0.8).add_to(m)
 
-    # 2. วาดชุดพิกัดที่มีปัญหา (สีแดง) พร้อมชื่อ
+    # 2. วาดชุดพิกัดที่มีปัญหา (สีแดง) พร้อมแสดงชื่อจุด
     for elem in kml_elements:
         if elem['is_point']:
             loc = elem['points'][0]
@@ -307,7 +307,7 @@ if uploaded_files or kml_elements or yellow_elements:
 
     m.add_child(MeasureControl(position='topright', primary_length_unit='meters'))
     
-    # Auto Zoom ไปยังขอบเขตข้อมูลทั้งหมด
+    # Auto Zoom
     if all_bounds: 
         m.fit_bounds(all_bounds, padding=[50, 50])
         
