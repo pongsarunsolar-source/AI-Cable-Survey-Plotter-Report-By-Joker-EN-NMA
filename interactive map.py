@@ -76,7 +76,7 @@ def analyze_cable_issue(image_bytes):
     except Exception:
         return "cable ตกพื้น"
 
-# --- 4. ฟังก์ชันจัดการพิกัด ---
+# --- 4. ฟังก์ชันจัดการพิกัด (อัปเดตให้อ่านพิกัดไม่มี N/E ได้) ---
 def get_lat_lon_exif(image):
     try:
         exif = image._getexif()
@@ -100,10 +100,20 @@ def get_lat_lon_ocr(image):
         img_for_ocr = image.copy()
         img_for_ocr.thumbnail((1000, 1000)) 
         img_np = np.array(img_for_ocr.convert('RGB'))
-        results = reader.readtext(img_np, paragraph=True, allowlist='0123456789.NE ne')
+        # เพิ่มการอนุญาตให้อ่านช่องว่างและขึ้นบรรทัดใหม่
+        results = reader.readtext(img_np, paragraph=True, allowlist='0123456789.NE ne \n')
         full_text = " ".join([res[1] for res in results])
-        match = re.search(r'(\d+\.\d+)\s*[nN].*?(\d+\.\d+)\s*[eE]', full_text)
-        if match: return float(match.group(1)), float(match.group(2))
+        
+        # รูปแบบที่ 1: ค้นหาแบบมีตัว N และ E
+        match1 = re.search(r'(\d+\.\d+)\s*[nN].*?(\d+\.\d+)\s*[eE]', full_text)
+        if match1: 
+            return float(match1.group(1)), float(match1.group(2))
+            
+        # รูปแบบที่ 2: ค้นหาตัวเลขทศนิยม 2 ชุดติดกัน (แก้ปัญหากล้องแบบใหม่)
+        match2 = re.search(r'(\d{2}\.\d+)\s+(\d{3}\.\d+)', full_text)
+        if match2:
+            return float(match2.group(1)), float(match2.group(2))
+            
     except: pass
     return None, None
 
@@ -500,7 +510,7 @@ with col_c1:
     # 2. ข้อมูลอื่นๆ ตามลำดับ
     cable_type = st.selectbox("เลือก Type Cable", ["4", "6", "12", "24", "48", "96"])
     
-    st.markdown("<b> Service ที่กระทบ</b>", unsafe_allow_html=True)
+    st.markdown("<b>⚠️ Service ที่กระทบ</b>", unsafe_allow_html=True)
     if st.checkbox("1. EDS"): selected_impact_services.append("EDS")
     if st.checkbox("2. FBB"): selected_impact_services.append("FBB")
     
@@ -529,7 +539,7 @@ with col_c1:
 
     # 4. ปุ่มดาวน์โหลดแสดงด้านล่างสุดของฝั่งซ้าย (เมื่ออัปโหลดรูปแล้ว)
     if not map_cap:
-        warning_placeholder.info("📌 กรุณาอัปโหลดรูป **Capture แผนที่**  ก่อนปุ่มดาวน์โหลดรายงานถึงจะแสดงขึ้นมาครับ")
+        warning_placeholder.info("📌 กรุณาอัปโหลดรูป **Capture แผนที่** ทางด้านซ้ายก่อน ปุ่มดาวน์โหลดรายงานถึงจะแสดงขึ้นมาครับ")
     else:
         try:
             bg_template_id = "1EqtiR6CVnsbsVIg5Gk5j1v901YXYzjkz"
@@ -556,6 +566,3 @@ with col_c1:
             )
         except Exception as e:
             st.error(f"เกิดข้อผิดพลาดในการสร้างรายงาน: {e}")
-
-
-
