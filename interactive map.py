@@ -176,12 +176,12 @@ def img_to_custom_icon(img, issue_text):
         </div>
     '''
 
-# --- 7. ฟังก์ชันสร้างรายงาน PowerPoint (Update: หน้าสรุป Title) ---
+# --- 7. ฟังก์ชันสร้างรายงาน PowerPoint (Title Slide + Summary) ---
 def create_summary_pptx(map_image_bytes, image_list, cable_type, route_distance, issue_kml_elements):
     prs = Presentation()
     prs.slide_width, prs.slide_height = Inches(10), Inches(5.625)
     
-    # หน้าแรก: รายละเอียดสรุป (New)
+    # หน้าแรก: รายละเอียดสรุป
     slide0 = prs.slides.add_slide(prs.slide_layouts[6])
     title_box = slide0.shapes.add_textbox(Inches(0.5), Inches(0.5), Inches(9), Inches(1))
     p_title = title_box.text_frame.paragraphs[0]
@@ -206,17 +206,17 @@ def create_summary_pptx(map_image_bytes, image_list, cable_type, route_distance,
     p3.font.bold = True
     p3.font.size = Pt(16)
     
-    for el in issue_kml_elements[:10]: # แสดง 10 จุดแรก
+    for el in issue_kml_elements[:10]:
         p_el = tf.add_paragraph()
         p_el.text = f"  - {el['name']} (Lat: {el['points'][0][0]:.5f}, Long: {el['points'][0][1]:.5f})"
         p_el.font.size = Pt(12)
 
-    # หน้าสอง: แผนที่
+    # หน้าแผนที่
     if map_image_bytes:
         slide1 = prs.slides.add_slide(prs.slide_layouts[6])
         slide1.shapes.add_picture(BytesIO(map_image_bytes), 0, 0, width=prs.slide_width, height=prs.slide_height)
         
-    # หน้าสาม: รูปถ่ายสำรวจ
+    # หน้าพิกัดรูปถ่าย
     if image_list:
         slide2 = prs.slides.add_slide(prs.slide_layouts[6])
         cols, rows = 4, 2
@@ -267,7 +267,7 @@ st.subheader("🌐 1. ข้อมูลโครงข่าย & จุดต�
 kml_file_yellow = st.file_uploader("Import KMZ - Overall (ภาพรวมแผนที่)", type=['kml', 'kmz'])
 kml_file = st.file_uploader("Import KMZ - พิกัดที่มีปัญหาและเสนอคร่อม cable", type=['kml', 'kmz'])
 
-zoom_bounds = [] # รวบรวมพิกัดสำหรับ Auto Zoom
+zoom_bounds = []
 kml_elements, kml_points_pool, yellow_elements = [], [], []
 
 if kml_file_yellow:
@@ -303,15 +303,15 @@ if uploaded_files:
                 storage_img.thumbnail((1200, 1200))
                 st.session_state.export_data.append({'img_obj': storage_img, 'issue': issue, 'lat': lat, 'lon': lon})
 
-# เพิ่มพิกัดรูปถ่ายลง Zoom Bounds
 for data in st.session_state.export_data:
     zoom_bounds.append([data['lat'], data['lon']])
 
-# Routing Logic
+# --- FIX 313: ปรับปรุงการเช็ค Routing ให้ปลอดภัยขึ้น ---
 route_coords, route_distance = None, 0
-head_p, tail_p = get_farthest_points(kml_points_pool)
-if head_p and tail_p:
-    route_coords, route_distance = get_osrm_route_head_tail(head_p, tail_p)
+if kml_points_pool: # เช็คว่ามีข้อมูลพิกัดใน Pool ก่อน
+    head_p, tail_p = get_farthest_points(kml_points_pool)
+    if head_p is not None and tail_p is not None:
+        route_coords, route_distance = get_osrm_route_head_tail(head_p, tail_p)
 
 # --- แสดงผลแผนที่ ---
 if uploaded_files or kml_elements or yellow_elements:
