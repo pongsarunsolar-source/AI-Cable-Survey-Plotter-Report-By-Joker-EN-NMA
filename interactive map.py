@@ -174,71 +174,94 @@ def img_to_custom_icon(img, issue_text):
         </div>
     '''
 
-# --- 7. ฟังก์ชันสร้างรายงาน PowerPoint (ปรับปรุงหัวข้อหน้า 2 และ 3) ---
+# --- 7. ฟังก์ชันสร้างรายงาน PowerPoint ---
 def create_summary_pptx(map_image_bytes, image_list, cable_type, route_distance, issue_kml_elements):
     prs = Presentation()
     prs.slide_width, prs.slide_height = Inches(10), Inches(5.625)
     
-    # --- หน้าที่ 1: รายละเอียดสรุป ---
+    # --- หน้าแรก: รายละเอียดสรุป ---
     slide0 = prs.slides.add_slide(prs.slide_layouts[6])
-    title_box0 = slide0.shapes.add_textbox(Inches(0.5), Inches(0.5), Inches(9), Inches(1))
-    p_title0 = title_box0.text_frame.paragraphs[0]
-    p_title0.text = f"รายงานสรุปแนวทางแก้ไขปัญหาและเสนอคร่อม Cable ({cable_type} Core)"
-    p_title0.font.bold, p_title0.font.size = True, Pt(22)
+    title_box = slide0.shapes.add_textbox(Inches(0.5), Inches(0.5), Inches(9), Inches(1))
+    p_title = title_box.text_frame.paragraphs[0]
+    p_title.text = f"รายงานสรุปแนวทางแก้ไขปัญหาและเสนอคร่อม Cable ({cable_type} Core)"
+    p_title.font.bold = True
+    p_title.font.size = Pt(22)
     
     info_box = slide0.shapes.add_textbox(Inches(0.5), Inches(1.5), Inches(9), Inches(3.5))
     tf = info_box.text_frame
     tf.word_wrap = True
     
-    p1 = tf.paragraphs[0]; p1.text = f"• Type Cable: {cable_type} Core"; p1.font.size = Pt(16)
-    p2 = tf.add_paragraph(); p2.text = f"• ระยะคร่อม Cable รวม: {route_distance:,.0f} เมตร ({route_distance/1000:.3f} กม.)"; p2.font.size = Pt(16)
-    p3 = tf.add_paragraph(); p3.text = f"• รายละเอียดจุดปัญหา:"; p3.font.bold, p3.font.size = True, Pt(16)
+    p1 = tf.paragraphs[0]
+    p1.text = f"• Type Cable: {cable_type} Core"
+    p1.font.size = Pt(16)
+    
+    p2 = tf.add_paragraph()
+    p2.text = f"• ระยะคร่อม Cable รวม: {route_distance:,.0f} เมตร ({route_distance/1000:.3f} กม.)"
+    p2.font.size = Pt(16)
+    
+    p3 = tf.add_paragraph()
+    p3.text = f"• รายละเอียดจุดปัญหา:" 
+    p3.font.bold = True
+    p3.font.size = Pt(16)
     
     for el in issue_kml_elements[:10]:
         p_el = tf.add_paragraph()
         p_el.text = f"  - {el['name']} (Lat: {el['points'][0][0]:.5f}, Long: {el['points'][0][1]:.5f})"
         p_el.font.size = Pt(12)
 
-    # --- หน้าที่ 2: Topology Overall (ภาพเต็มหน้า + หัวข้อขีดเส้นใต้มุมบนซ้าย) ---
+    # --- หน้าแผนที่ (หน้า 2) ---
     if map_image_bytes:
         slide1 = prs.slides.add_slide(prs.slide_layouts[6])
+        # แสดงรูปภาพเต็มจอ
         slide1.shapes.add_picture(BytesIO(map_image_bytes), 0, 0, width=prs.slide_width, height=prs.slide_height)
         
-        title_box1 = slide1.shapes.add_textbox(Inches(0.2), Inches(0.1), Inches(4), Inches(0.5))
+        # เพิ่ม Title: Topology Overall (ขีดเส้นใต้ มุมบนซ้าย)
+        title_box1 = slide1.shapes.add_textbox(Inches(0.2), Inches(0.1), Inches(5), Inches(0.5))
         p_title1 = title_box1.text_frame.paragraphs[0]
         p_title1.text = "Topology Overall"
-        p_title1.font.bold, p_title1.font.size, p_title1.font.underline = True, Pt(24), True
-
-    # --- หน้าที่ 3: รูปภาพแสดงจุดที่มีปัญหา ---
+        p_title1.font.bold = True
+        p_title1.font.size = Pt(24)
+        p_title1.font.underline = True
+        
+    # --- หน้าพิกัดรูปถ่ายสำรวจ (หน้า 3) ---
     if image_list:
         slide2 = prs.slides.add_slide(prs.slide_layouts[6])
+        
+        # เพิ่ม Title: รูปภาพแสดงจุดที่มีปัญหา (ขีดเส้นใต้ มุมบนซ้าย)
         title_box2 = slide2.shapes.add_textbox(Inches(0.2), Inches(0.1), Inches(6), Inches(0.5))
         p_title2 = title_box2.text_frame.paragraphs[0]
         p_title2.text = "รูปภาพแสดงจุดที่มีปัญหา"
-        p_title2.font.bold, p_title2.font.size, p_title2.font.underline = True, Pt(22), True
+        p_title2.font.bold = True
+        p_title2.font.size = Pt(22)
+        p_title2.font.underline = True
 
         cols, rows = 4, 2
         img_w, img_h = Inches(2.1), Inches(1.5)
-        margin_x, start_y = (prs.slide_width - (img_w * cols)) / (cols + 1), Inches(0.9)
+        margin_x = (prs.slide_width - (img_w * cols)) / (cols + 1)
+        # ปรับระยะด้านบนลงมาเพื่อไม่ให้ทับหัวข้อ
+        margin_y = Inches(0.8) 
         
         for i, item in enumerate(image_list[:8]):
-            x, y = margin_x + ((i % cols) * (img_w + margin_x)), start_y + ((i // cols) * (img_h + Inches(0.8)))
+            curr_row, curr_col = i // cols, i % cols
+            x, y = margin_x + (curr_col * (img_w + margin_x)), margin_y + (curr_row * (img_h + Inches(0.8))) 
             image = item['img_obj'].copy()
             target_ratio = img_w / img_h
             w_px, h_px = image.size
             if (w_px/h_px) > target_ratio:
                 new_w = h_px * target_ratio
-                image = image.crop(((w_px - new_w) / 2, 0, (w_px + new_w) / 2, h_px))
+                left = (w_px - new_w) / 2
+                image = image.crop((left, 0, left + new_w, h_px))
             else:
                 new_h = w_px / target_ratio
-                image = image.crop((0, (h_px - new_h) / 2, w_px, (h_px + new_h) / 2))
-            
+                top = (h_px - new_h) / 2
+                image = image.crop((0, top, w_px, top + new_h))
             buf = BytesIO(); image.save(buf, format="JPEG"); buf.seek(0)
             slide2.shapes.add_picture(buf, x, y, width=img_w, height=img_h)
-            txt_box = slide2.shapes.add_textbox(x, y + img_h + Inches(0.05), img_w, Inches(0.6)).text_frame
-            txt_box.word_wrap = True
-            p_iss = txt_box.paragraphs[0]; p_iss.text = f"สาเหตุ: {item['issue']}"; p_iss.font.size = Pt(8); p_iss.font.bold = True
-            p_lat = txt_box.add_paragraph(); p_lat.text = f"Lat: {item['lat']:.5f}\nLong: {item['lon']:.5f}"; p_lat.font.size = Pt(7)
+            txt_box = slide2.shapes.add_textbox(x, y + img_h + Inches(0.05), img_w, Inches(0.6))
+            tf_img = txt_box.text_frame
+            tf_img.word_wrap = True
+            p1_img = tf_img.paragraphs[0]; p1_img.text = f"สาเหตุ: {item['issue']}"; p1_img.font.size = Pt(8); p1_img.font.bold = True
+            p2_img = tf_img.add_paragraph(); p2_img.text = f"Lat: {item['lat']:.5f}\nLong: {item['lon']:.5f}"; p2_img.font.size = Pt(7)
             
     output = BytesIO(); prs.save(output)
     return output.getvalue()
@@ -250,11 +273,12 @@ st.markdown("""<style>
     .header-container { display: flex; align-items: center; justify-content: space-between; padding: 25px; background: white; border-radius: 24px; border-bottom: 5px solid #FF8C42; margin-bottom: 30px; }
     .main-title { background: linear-gradient(90deg, #2D5A27 0%, #FF8C42 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-weight: 800; font-size: 2.6rem; margin: 0; }
     .joker-icon { width: 100px; height: 100px; object-fit: cover; border-radius: 50%; border: 4px solid #FFFFFF; outline: 3px solid #FF8C42; }
-    .stButton>button { background: #2D5A27; color: white; border-radius: 14px; padding: 12px 35px; font-weight: 600; width: 100%; }
+    .stButton>button { background: #2D5A27; color: white; border-radius: 14px; padding: 12px 35px; font-weight: 600; }
 </style>""", unsafe_allow_html=True)
 
 joker_base64 = get_image_base64_from_drive("1_G_r4yKyBA_vv3Nf8SdFpQ8UKv4bPLBr")
-st.markdown(f'''<div class="header-container"><div><h1 class="main-title">AI Cable Plotter</h1><p style="margin:0; color: #718096; font-weight: 600;">By Joker EN-NMA</p></div>{"<img src='data:image/png;base64,"+joker_base64+"' class='joker-icon'>" if joker_base64 else ""}</div>''', unsafe_allow_html=True)
+header_html = f'''<div class="header-container"><div><h1 class="main-title">AI Cable Plotter</h1><p style="margin:0; color: #718096; font-weight: 600;">By Joker EN-NMA</p></div>{"<img src='data:image/png;base64,"+joker_base64+"' class='joker-icon'>" if joker_base64 else ""}</div>'''
+st.markdown(header_html, unsafe_allow_html=True)
 
 # --- 9. เมนู KML/KMZ ---
 st.subheader("🌐 1. ข้อมูลโครงข่าย & จุดติดตั้ง (KML/KMZ)")
@@ -268,8 +292,8 @@ if kml_file_yellow:
     yellow_elements, _ = parse_kml_data(kml_file_yellow)
     for el in yellow_elements: zoom_bounds.extend(el['points'])
 if kml_file:
-    k_elements, k_points_pool = parse_kml_data(kml_file)
-    for el in k_elements: zoom_bounds.extend(el['points'])
+    kml_elements, kml_points_pool = parse_kml_data(kml_file)
+    for el in kml_elements: zoom_bounds.extend(el['points'])
 
 st.markdown("<hr>", unsafe_allow_html=True)
 
@@ -282,15 +306,22 @@ if uploaded_files:
     current_hash = "".join([f.name + str(f.size) for f in uploaded_files])
     if 'last_hash' not in st.session_state or st.session_state.last_hash != current_hash:
         st.session_state.export_data, st.session_state.last_hash = [], current_hash
-        for f in uploaded_files:
-            raw_data = f.getvalue(); raw_img = Image.open(BytesIO(raw_data))
+    for i, f in enumerate(uploaded_files):
+        if i >= len(st.session_state.export_data):
+            raw_data = f.getvalue()
+            raw_img = Image.open(BytesIO(raw_data))
+            img_st = ImageOps.exif_transpose(raw_img)
             lat, lon = get_lat_lon_exif(raw_img)
-            if lat is None: lat, lon = get_lat_lon_ocr(raw_img)
+            if lat is None: lat, lon = get_lat_lon_ocr(img_st)
             if lat:
                 issue = analyze_cable_issue(raw_data)
-                st.session_state.export_data.append({'img_obj': ImageOps.exif_transpose(raw_img), 'issue': issue, 'lat': lat, 'lon': lon})
-                zoom_bounds.append([lat, lon])
+                storage_img = img_st.copy()
+                storage_img.thumbnail((1200, 1200))
+                st.session_state.export_data.append({'img_obj': storage_img, 'issue': issue, 'lat': lat, 'lon': lon})
 
+for data in st.session_state.export_data: zoom_bounds.append([data['lat'], data['lon']])
+
+# แก้ไขบั๊กเพื่อไม่ให้เกิด ValueError เมื่อข้อมูล KMZ ไม่ครบ
 route_coords, route_distance = None, 0
 if kml_points_pool:
     try:
@@ -333,4 +364,4 @@ if map_cap:
                 pptx_data = create_summary_pptx(map_cap.getvalue(), st.session_state.export_data, cable_type, route_distance, kml_elements)
                 st.download_button("📥 คลิกเพื่อดาวน์โหลด", data=pptx_data, file_name=f"Cable_Survey_{cable_type}C.pptx")
             except Exception as e:
-                st.error(f"เกิดข้อผิดพลาดในการสร้างไฟล์: {e}")
+                st.error(f"เกิดข้อผิดพลาดในการสร้างรายงาน: {e}")
