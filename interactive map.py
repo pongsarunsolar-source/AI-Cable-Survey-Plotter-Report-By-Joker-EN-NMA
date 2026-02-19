@@ -16,7 +16,7 @@ from pptx import Presentation
 from pptx.util import Inches, Pt
 from pptx.dml.color import RGBColor
 from pptx.enum.text import PP_ALIGN
-from pptx.enum.shapes import MSO_SHAPE
+from pptx.enum.shapes import MSO_SHAPE 
 from google import genai
 from google.genai import types
 import zipfile
@@ -368,7 +368,6 @@ st.set_page_config(page_title="AI Cable Survey", layout="wide")
 
 joker_base64 = get_image_base64_from_drive("1_G_r4yKyBA_vv3Nf8SdFpQ8UKv4bPLBr")
 
-# สร้าง CSS อัตโนมัติ (ใส่รูป Joker เป็นพื้นหลังของปุ่ม ดาวน์โหลด)
 custom_css = f"""
 <style>
     .stApp {{ background: linear-gradient(120deg, #FFF5ED 0%, #F0F9F1 100%); }}
@@ -376,12 +375,11 @@ custom_css = f"""
     .main-title {{ background: linear-gradient(90deg, #2D5A27 0%, #FF8C42 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-weight: 800; font-size: 2.6rem; margin: 0; }}
     .joker-icon {{ width: 100px; height: 100px; object-fit: cover; border-radius: 50%; border: 4px solid #FFFFFF; outline: 3px solid #FF8C42; }}
     
-    /* สไตล์ปุ่ม Download ให้สวยและตัวอักษรอยู่ตรงกลาง */
     .stDownloadButton>button {{ 
         background: linear-gradient(90deg, #A8E6CF 0%, #FFD3B6 100%); 
         color: #2D5A27 !important; 
         border-radius: 14px; 
-        padding: 15px 35px 15px 50px; /* เว้นที่ว่างด้านซ้ายให้รูปภาพ */
+        padding: 15px 35px 15px 50px; 
         font-weight: 800 !important; 
         width: 100%; 
         border: none;
@@ -391,7 +389,6 @@ custom_css = f"""
     }}
     .stDownloadButton>button:hover {{ transform: scale(1.02); }}
 """
-# ถ้าดึงรูปได้ ให้แทรกรูปไปในขอบปุ่ม
 if joker_base64:
     custom_css += f"""
     .stDownloadButton>button::before {{
@@ -413,7 +410,7 @@ if joker_base64:
 custom_css += "</style>"
 
 st.markdown(custom_css, unsafe_allow_html=True)
-header_html = f'''<div class="header-container"><div><h1 class="main-title">AI Cable Plotter & Report</h1><p style="margin:0; color: #718096; font-weight: 600;">By Joker EN-NMA</p></div>{"<img src='data:image/png;base64,"+joker_base64+"' class='joker-icon'>" if joker_base64 else ""}</div>'''
+header_html = f'''<div class="header-container"><div><h1 class="main-title">AI Cable Plotter</h1><p style="margin:0; color: #718096; font-weight: 600;">By Joker EN-NMA</p></div>{"<img src='data:image/png;base64,"+joker_base64+"' class='joker-icon'>" if joker_base64 else ""}</div>'''
 st.markdown(header_html, unsafe_allow_html=True)
 
 # --- 9. เมนู KML/KMZ ---
@@ -494,9 +491,8 @@ selected_impact_services = []
 col_c1, col_c2 = st.columns(2)
 with col_c1:
     cable_type = st.selectbox("เลือก Type Cable", ["4", "6", "12", "24", "48", "96"])
-    map_cap = st.file_uploader("อัปโหลดรูป Capture แผนที่", type=['jpg','png'])
     
-    st.markdown("<b> Service ที่กระทบ</b>", unsafe_allow_html=True)
+    st.markdown("<b>⚠️ Service ที่กระทบ</b>", unsafe_allow_html=True)
     if st.checkbox("1. EDS"): selected_impact_services.append("EDS")
     if st.checkbox("2. FBB"): selected_impact_services.append("FBB")
     
@@ -519,10 +515,13 @@ with col_c1:
     if cb_dwdm:
         dwdm_text = st.text_input("ระบุรายละเอียด DWDM:", key="dwdm_text")
         selected_impact_services.append(f"DWDM ({dwdm_text})" if dwdm_text else "DWDM")
+        
+    # ย้ายมาไว้ข้างล่างสุดของฝั่งซ้าย
+    map_cap = st.file_uploader("อัปโหลดรูป Capture แผนที่", type=['jpg','png'])
 
 with col_c2:
     if not map_cap:
-        st.info("📌 กรุณาอัปโหลดรูป **Capture แผนที่** ทางด้านซ้ายก่อน ปุ่มดาวน์โหลดถึงจะแสดงขึ้นมาครับ")
+        st.info("📌 กรุณาอัปโหลดรูป **Capture แผนที่** ทางด้านซ้ายก่อน ปุ่มดาวน์โหลดรายงานถึงจะแสดงขึ้นมาครับ")
     else:
         try:
             bg_template_id = "1EqtiR6CVnsbsVIg5Gk5j1v901YXYzjkz"
@@ -538,7 +537,6 @@ with col_c2:
                 template_bytes
             )
             
-            # โค้ดปุ่มดาวน์โหลดที่ตัวหนังสืออยู่ตรงกลาง และใช้ CSS คุมไอคอนทั้งหมด
             st.download_button(
                 label="ดาวน์โหลดรายงาน PPTX", 
                 data=pptx_data, 
@@ -547,5 +545,3 @@ with col_c2:
             )
         except Exception as e:
             st.error(f"เกิดข้อผิดพลาดในการสร้างรายงาน: {e}")
-
-
