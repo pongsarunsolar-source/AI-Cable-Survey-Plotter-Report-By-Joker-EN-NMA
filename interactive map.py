@@ -43,7 +43,7 @@ def get_image_base64_from_drive(file_id):
     except Exception: return None
     return None
 
-# --- 3. ฟังก์ชันวิเคราะห์สาเหตุด้วย AI ---
+# --- 3. ฟังก์ชันวิเคราะห์สาเหตุด้วย AI (Default: cable ตกพื้น) ---
 def analyze_cable_issue(image_bytes):
     try:
         response = client.models.generate_content(
@@ -158,11 +158,7 @@ def get_osrm_route_head_tail(start_coord, end_coord):
 
 # --- 6. ฟังก์ชันสร้าง Label ชื่อ ---
 def create_div_label(name, color="#D9534F"):
-    return f'''
-        <div style="font-size: 11px; font-weight: 800; color: {color}; white-space: nowrap; transform: translate(-50%, -150%); background-color: transparent; text-shadow: 2px 2px 4px white, -2px -2px 4px white, 2px -2px 4px white, -2px 2px 4px white; font-family: 'Inter', sans-serif;">
-            {name}
-        </div>
-    '''
+    return f'''<div style="font-size: 11px; font-weight: 800; color: {color}; white-space: nowrap; transform: translate(-50%, -150%); background-color: transparent; text-shadow: 2px 2px 4px white, -2px -2px 4px white, 2px -2px 4px white, -2px 2px 4px white; font-family: 'Inter', sans-serif;">{name}</div>'''
 
 def img_to_custom_icon(img, issue_text):
     img_resized = img.copy()
@@ -178,56 +174,50 @@ def img_to_custom_icon(img, issue_text):
         </div>
     '''
 
-# --- 7. ฟังก์ชันสร้างรายงาน PowerPoint (Title Slide + Summary) ---
+# --- 7. ฟังก์ชันสร้างรายงาน PowerPoint (เพิ่ม Title หน้า 2 และ 3) ---
 def create_summary_pptx(map_image_bytes, image_list, cable_type, route_distance, issue_kml_elements):
     prs = Presentation()
     prs.slide_width, prs.slide_height = Inches(10), Inches(5.625)
     
-    # หน้าแรก: รายละเอียดสรุป
+    # --- หน้าที่ 1: รายละเอียดสรุป ---
     slide0 = prs.slides.add_slide(prs.slide_layouts[6])
-    title_box = slide0.shapes.add_textbox(Inches(0.5), Inches(0.5), Inches(9), Inches(1))
-    p_title = title_box.text_frame.paragraphs[0]
-    p_title.text = f"รายงานสรุปแนวทางแก้ไขปัญหาและเสนอคร่อม Cable ({cable_type} Core)"
-    p_title.font.bold = True
-    p_title.font.size = Pt(22)
+    title_box0 = slide0.shapes.add_textbox(Inches(0.5), Inches(0.5), Inches(9), Inches(1))
+    p_title0 = title_box0.text_frame.paragraphs[0]
+    p_title0.text = f"รายงานสรุปแนวทางแก้ไขปัญหาและเสนอคร่อม Cable ({cable_type} Core)"
+    p_title0.font.bold, p_title0.font.size = True, Pt(22)
     
     info_box = slide0.shapes.add_textbox(Inches(0.5), Inches(1.5), Inches(9), Inches(3.5))
     tf = info_box.text_frame
     tf.word_wrap = True
     
-    p1 = tf.paragraphs[0]
-    p1.text = f"• Type Cable: {cable_type} Core"
-    p1.font.size = Pt(16)
-    
-    p2 = tf.add_paragraph()
-    p2.text = f"• ระยะคร่อม Cable รวม: {route_distance:,.0f} เมตร ({route_distance/1000:.3f} กม.)"
-    p2.font.size = Pt(16)
-    
-    p3 = tf.add_paragraph()
-    p3.text = f"• รายละเอียดจุดปัญหา (Nameplate):"
-    p3.font.bold = True
-    p3.font.size = Pt(16)
+    p1 = tf.paragraphs[0]; p1.text = f"• Type Cable: {cable_type} Core"; p1.font.size = Pt(16)
+    p2 = tf.add_paragraph(); p2.text = f"• ระยะคร่อม Cable รวม: {route_distance:,.0f} เมตร ({route_distance/1000:.3f} กม.)"; p2.font.size = Pt(16)
+    p3 = tf.add_paragraph(); p3.text = f"• รายละเอียดจุดปัญหา:"; p3.font.bold, p3.font.size = True, Pt(16)
     
     for el in issue_kml_elements[:10]:
-        p_el = tf.add_paragraph()
-        p_el.text = f"  - {el['name']} (Lat: {el['points'][0][0]:.5f}, Long: {el['points'][0][1]:.5f})"
-        p_el.font.size = Pt(12)
+        p_el = tf.add_paragraph(); p_el.text = f"  - {el['name']} (Lat: {el['points'][0][0]:.5f}, Long: {el['points'][0][1]:.5f})"; p_el.font.size = Pt(12)
 
-    # หน้าแผนที่
+    # --- หน้าที่ 2: ภาพแสดงแผนที่ ---
     if map_image_bytes:
         slide1 = prs.slides.add_slide(prs.slide_layouts[6])
-        slide1.shapes.add_picture(BytesIO(map_image_bytes), 0, 0, width=prs.slide_width, height=prs.slide_height)
+        title_box1 = slide1.shapes.add_textbox(Inches(0.5), Inches(0.2), Inches(9), Inches(0.5))
+        p_title1 = title_box1.text_frame.paragraphs[0]; p_title1.text = "ภาพแสดงแผนที่"; p_title1.font.bold, p_title1.font.size = True, Pt(20)
+        slide1.shapes.add_picture(BytesIO(map_image_bytes), 0, Inches(0.8), width=prs.slide_width, height=Inches(4.825))
         
-    # หน้าพิกัดรูปถ่าย
+    # --- หน้าที่ 3: รูปภาพแสดงจุดที่มีปัญหา ---
     if image_list:
         slide2 = prs.slides.add_slide(prs.slide_layouts[6])
+        title_box2 = slide2.shapes.add_textbox(Inches(0.5), Inches(0.2), Inches(9), Inches(0.5))
+        p_title2 = title_box2.text_frame.paragraphs[0]; p_title2.text = "รูปภาพแสดงจุดที่มีปัญหา"; p_title2.font.bold, p_title2.font.size = True, Pt(20)
+
         cols, rows = 4, 2
         img_w, img_h = Inches(2.1), Inches(1.5)
         margin_x = (prs.slide_width - (img_w * cols)) / (cols + 1)
-        margin_y = (prs.slide_height - (img_h * rows + Inches(1.0))) / (rows + 1)
+        start_y = Inches(0.8) 
+        
         for i, item in enumerate(image_list[:8]):
             curr_row, curr_col = i // cols, i % cols
-            x, y = margin_x + (curr_col * (img_w + margin_x)), margin_y + (curr_row * (img_h + margin_y + Inches(0.5)))
+            x, y = margin_x + (curr_col * (img_w + margin_x)), start_y + (curr_row * (img_h + Inches(0.8)))
             image = item['img_obj'].copy()
             target_ratio = img_w / img_h
             w_px, h_px = image.size
@@ -242,10 +232,11 @@ def create_summary_pptx(map_image_bytes, image_list, cable_type, route_distance,
             buf = BytesIO(); image.save(buf, format="JPEG"); buf.seek(0)
             slide2.shapes.add_picture(buf, x, y, width=img_w, height=img_h)
             txt_box = slide2.shapes.add_textbox(x, y + img_h + Inches(0.05), img_w, Inches(0.6))
-            tf = txt_box.text_frame
-            tf.word_wrap = True
-            p1 = tf.paragraphs[0]; p1.text = f"สาเหตุ: {item['issue']}"; p1.font.size = Pt(8); p1.font.bold = True
-            p2 = tf.add_paragraph(); p2.text = f"Lat: {item['lat']:.5f}\nLong: {item['lon']:.5f}"; p2.font.size = Pt(7)
+            tf_img = txt_box.text_frame
+            tf_img.word_wrap = True
+            p_iss = tf_img.paragraphs[0]; p_iss.text = f"สาเหตุ: {item['issue']}"; p_iss.font.size = Pt(8); p_iss.font.bold = True
+            p_lat = tf_img.add_paragraph(); p_lat.text = f"Lat: {item['lat']:.5f}\nLong: {item['lon']:.5f}"; p_lat.font.size = Pt(7)
+            
     output = BytesIO(); prs.save(output)
     return output.getvalue()
 
@@ -260,8 +251,7 @@ st.markdown("""<style>
 </style>""", unsafe_allow_html=True)
 
 joker_base64 = get_image_base64_from_drive("1_G_r4yKyBA_vv3Nf8SdFpQ8UKv4bPLBr")
-header_html = f'''<div class="header-container"><div><h1 class="main-title">AI Cable Plotter</h1><p style="margin:0; color: #718096; font-weight: 600;">By Joker EN-NMA</p></div>
-{"<img src='data:image/png;base64,"+joker_base64+"' class='joker-icon'>" if joker_base64 else ""}</div>'''
+header_html = f'''<div class="header-container"><div><h1 class="main-title">AI Cable Plotter</h1><p style="margin:0; color: #718096; font-weight: 600;">By Joker EN-NMA</p></div>{"<img src='data:image/png;base64,"+joker_base64+"' class='joker-icon'>" if joker_base64 else ""}</div>'''
 st.markdown(header_html, unsafe_allow_html=True)
 
 # --- 9. เมนู KML/KMZ ---
@@ -275,7 +265,6 @@ kml_elements, kml_points_pool, yellow_elements = [], [], []
 if kml_file_yellow:
     yellow_elements, _ = parse_kml_data(kml_file_yellow)
     for el in yellow_elements: zoom_bounds.extend(el['points'])
-
 if kml_file:
     kml_elements, kml_points_pool = parse_kml_data(kml_file)
     for el in kml_elements: zoom_bounds.extend(el['points'])
@@ -290,8 +279,7 @@ if 'export_data' not in st.session_state: st.session_state.export_data = []
 if uploaded_files:
     current_hash = "".join([f.name + str(f.size) for f in uploaded_files])
     if 'last_hash' not in st.session_state or st.session_state.last_hash != current_hash:
-        st.session_state.export_data = []
-        st.session_state.last_hash = current_hash
+        st.session_state.export_data, st.session_state.last_hash = [], current_hash
     for i, f in enumerate(uploaded_files):
         if i >= len(st.session_state.export_data):
             raw_data = f.getvalue()
@@ -305,61 +293,44 @@ if uploaded_files:
                 storage_img.thumbnail((1200, 1200))
                 st.session_state.export_data.append({'img_obj': storage_img, 'issue': issue, 'lat': lat, 'lon': lon})
 
-for data in st.session_state.export_data:
-    zoom_bounds.append([data['lat'], data['lon']])
+for data in st.session_state.export_data: zoom_bounds.append([data['lat'], data['lon']])
 
-# --- FIX LOGIC: ตรวจสอบพิกัดก่อน Routing ---
 route_coords, route_distance = None, 0
 if kml_points_pool:
     try:
-        f_points = get_farthest_points(kml_points_pool)
-        if f_points and f_points[0] is not None and f_points[1] is not None:
-            route_coords, route_distance = get_osrm_route_head_tail(f_points[0], f_points[1])
+        f_p = get_farthest_points(kml_points_pool)
+        if f_p and f_p[0] and f_p[1]: route_coords, route_distance = get_osrm_route_head_tail(f_p[0], f_p[1])
     except: pass
 
-# --- แสดงผลแผนที่ ---
 if uploaded_files or kml_elements or yellow_elements:
     m = folium.Map(location=[13.75, 100.5], zoom_start=17, tiles=None, control_scale=True)
     folium.TileLayer(tiles="https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}", attr="Google", name="Google Maps", opacity=0.4, overlay=False).add_to(m)
-    
     if route_coords:
         folium.PolyLine(route_coords, color="#FF0000", weight=5, opacity=0.8, dash_array='10, 10').add_to(m)
         st.info(f"📍 ระยะคร่อม cable: {route_distance/1000:.3f} กม. ({route_distance:,.0f} เมตร)")
-
     for elem in yellow_elements:
         if elem['is_point']:
             folium.Marker(elem['points'][0], icon=folium.Icon(color='orange')).add_to(m)
             folium.Marker(elem['points'][0], icon=folium.DivIcon(html=create_div_label(elem['name'], "#CC9900"))).add_to(m)
-        else:
-            folium.PolyLine(elem['points'], color="#FFD700", weight=4, opacity=0.8).add_to(m)
-
+        else: folium.PolyLine(elem['points'], color="#FFD700", weight=4, opacity=0.8).add_to(m)
     for elem in kml_elements:
         if elem['is_point']:
             folium.Marker(elem['points'][0], icon=folium.Icon(color='red')).add_to(m)
             folium.Marker(elem['points'][0], icon=folium.DivIcon(html=create_div_label(elem['name'], "#D9534F"))).add_to(m)
-        else:
-            folium.PolyLine(elem['points'], color="gray", weight=2, opacity=0.4, dash_array='5').add_to(m)
-
-    for data in st.session_state.export_data:
-        folium.Marker([data['lat'], data['lon']], icon=folium.DivIcon(html=img_to_custom_icon(data['img_obj'], data['issue']))).add_to(m)
-
+        else: folium.PolyLine(elem['points'], color="gray", weight=2, opacity=0.4, dash_array='5').add_to(m)
+    for d in st.session_state.export_data: folium.Marker([d['lat'], d['lon']], icon=folium.DivIcon(html=img_to_custom_icon(d['img_obj'], d['issue']))).add_to(m)
     m.add_child(MeasureControl(position='topright', primary_length_unit='meters'))
     if zoom_bounds: m.fit_bounds(zoom_bounds, padding=[50, 50])
     st_folium(m, height=1200, use_container_width=True, key="survey_map")
 
-# --- Section 3: PPTX Report (แก้ไขให้ปุ่มกลับมาแสดง) ---
 st.markdown("<hr>", unsafe_allow_html=True)
 st.subheader("📄 3. สร้างรายงาน PowerPoint")
 col_c1, col_c2 = st.columns(2)
 with col_c1:
     cable_type = st.selectbox("เลือก Type Cable", ["4", "6", "12", "24", "48", "96"])
     map_cap = st.file_uploader("อัปโหลดรูป Capture แผนที่", type=['jpg','png'])
-
-# แสดงปุ่มหากมีการอัปโหลดรูป Capture แผนที่
 if map_cap:
     with col_c2:
         if st.button("🚀 ดาวน์โหลดรายงาน PPTX"):
-            # แม้ไม่มีรูปถ่ายสำรวจ ก็ให้ออกรายงานได้ (เป็น List ว่าง)
-            survey_data = st.session_state.export_data if st.session_state.export_data else []
-            pptx_data = create_summary_pptx(map_cap.getvalue(), survey_data, cable_type, route_distance, kml_elements)
+            pptx_data = create_summary_pptx(map_cap.getvalue(), st.session_state.export_data, cable_type, route_distance, kml_elements)
             st.download_button("📥 คลิกเพื่อดาวน์โหลด", data=pptx_data, file_name=f"Cable_Survey_{cable_type}C.pptx")
