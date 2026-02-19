@@ -291,18 +291,16 @@ if uploaded_files or kml_elements or yellow_elements:
         control=True
     ).add_to(m)
     
-    # ---------------------------------------------------------
-    # ปรับเส้นประสีน้ำเงินเป็นสีแดงตามคำขอ
-    # ---------------------------------------------------------
     if route_coords:
         folium.PolyLine(
             route_coords, 
-            color="#FF0000", # เปลี่ยนเป็นสีแดง
+            color="#FF0000", 
             weight=5, 
             opacity=0.8, 
             dash_array='10, 10'
         ).add_to(m)
-        st.info(f"📍 ระยะทางชุดหลัก: {route_distance/1000:.3f} กม. ({route_distance:,.0f} เมตร)")
+        # เปลี่ยนชื่อ ระยะทางชุดหลัก เป็น ระยะคร่อม cable
+        st.info(f"📍 ระยะคร่อม cable: {route_distance/1000:.3f} กม. ({route_distance:,.0f} เมตร)")
 
     # 1. วาดชุด Overall (สีเหลือง)
     for elem in yellow_elements:
@@ -328,7 +326,6 @@ if uploaded_files or kml_elements or yellow_elements:
 
     m.add_child(MeasureControl(position='topright', primary_length_unit='meters'))
     
-    # Auto Zoom ไปยังพิกัดที่มีปัญหา
     if zoom_bounds: 
         m.fit_bounds(zoom_bounds, padding=[50, 50])
     elif yellow_elements:
