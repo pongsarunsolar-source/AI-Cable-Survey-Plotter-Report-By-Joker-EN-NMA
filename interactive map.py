@@ -16,6 +16,7 @@ from pptx import Presentation
 from pptx.util import Inches, Pt
 from pptx.dml.color import RGBColor
 from pptx.enum.text import PP_ALIGN
+from pptx.enum.shapes import MSO_SHAPE # นำเข้าสำหรับสร้างกรอบสี่เหลี่ยม
 from google import genai
 from google.genai import types
 import zipfile
@@ -187,7 +188,7 @@ def img_to_custom_icon(img, issue_text):
         </div>
     '''
 
-# --- 7. ฟังก์ชันสร้างรายงาน PowerPoint (ปรับปรุงหน้าที่ 2) ---
+# --- 7. ฟังก์ชันสร้างรายงาน PowerPoint (อัปเดตหน้าที่ 2) ---
 def create_summary_pptx(map_image_bytes, image_list, cable_type, route_distance, issue_kml_elements, template_bytes=None):
     prs = Presentation()
     prs.slide_width, prs.slide_height = Inches(10), Inches(5.625)
@@ -226,7 +227,7 @@ def create_summary_pptx(map_image_bytes, image_list, cable_type, route_distance,
     p_ver.font.color.rgb = RGBColor(0, 0, 0) 
 
     # ==========================================
-    # --- หน้าที่ 2: รายละเอียดสรุป (UPDATE ตามรูปภาพล่าสุด) ---
+    # --- หน้าที่ 2: สรุปแนวทางแก้ไขปัญหา (มีกรอบและ Scope Of Work) ---
     # ==========================================
     slide0 = prs.slides.add_slide(prs.slide_layouts[6])
     apply_background(slide0) 
@@ -237,37 +238,55 @@ def create_summary_pptx(map_image_bytes, image_list, cable_type, route_distance,
     p_title.text = f"รายงานสรุปแนวทางแก้ไขปัญหาและเสนอคร่อม Cable ({cable_type} Core)"
     p_title.font.bold = True
     p_title.font.size = Pt(22)
-    
-    # 2. กล่องเนื้อหา (Type, ระยะคร่อม, รายละเอียด)
-    info_box = slide0.shapes.add_textbox(Inches(0.5), Inches(1.2), Inches(7.5), Inches(4.0))
-    tf = info_box.text_frame
-    tf.word_wrap = True
-    
-    # Type Cable
-    p1 = tf.paragraphs[0]
-    p1.text = f"• Type Cable: {cable_type} Core"
-    p1.font.bold = True
-    p1.font.size = Pt(16)
-    
-    # ระยะคร่อม
-    p2 = tf.add_paragraph()
-    # ตรวจสอบว่า route_distance มีค่าไหม ถ้ามีค่อยใส่คอมม่า
+
+    # 2. ปัญหา สาเหตุและผลกระทบ (พร้อมขีดเส้นใต้)
+    prob_box = slide0.shapes.add_textbox(Inches(0.5), Inches(0.9), Inches(7.5), Inches(0.5))
+    p_prob = prob_box.text_frame.paragraphs[0]
+    p_prob.text = "ปัญหา สาเหตุและผลกระทบ"
+    p_prob.font.bold = True
+    p_prob.font.underline = True
+    p_prob.font.size = Pt(16)
+
+    # 2.1 สร้างกรอบสี่เหลี่ยมไว้สำหรับพิมพ์ Manual
+    shape_box = slide0.shapes.add_shape(MSO_SHAPE.RECTANGLE, Inches(0.6), Inches(1.4), Inches(7.0), Inches(0.8))
+    shape_box.fill.background() # ทำให้พื้นหลังกล่องโปร่งใส
+    shape_box.line.color.rgb = RGBColor(0, 0, 0) # เส้นขอบสีดำ
+    p_guide = shape_box.text_frame.paragraphs[0]
+    p_guide.text = " (คลิกเพื่อพิมพ์ปัญหา สาเหตุ และผลกระทบ...)"
+    p_guide.font.color.rgb = RGBColor(128, 128, 128)
+    p_guide.font.size = Pt(12)
+
+    # 3. Scope Of Work (พร้อมขีดเส้นใต้)
+    scope_box = slide0.shapes.add_textbox(Inches(0.5), Inches(2.3), Inches(7.5), Inches(3.0))
+    tf_scope = scope_box.text_frame
+    tf_scope.word_wrap = True
+
+    p_scope = tf_scope.paragraphs[0]
+    p_scope.text = "Scope Of Work"
+    p_scope.font.bold = True
+    p_scope.font.underline = True
+    p_scope.font.size = Pt(16)
+
+    p_type = tf_scope.add_paragraph()
+    p_type.text = f"• Type Cable: {cable_type} Core"
+    p_type.font.size = Pt(14)
+
+    p_dist = tf_scope.add_paragraph()
     if route_distance:
-         p2.text = f"• ระยะคร่อม Cable รวม: {route_distance:,.0f} เมตร ({route_distance/1000:.3f} กม.)"
+        p_dist.text = f"• ระยะคร่อม Cable รวม: {route_distance:,.0f} เมตร ({route_distance/1000:.3f} กม.)"
     else:
-         p2.text = "• ระยะคร่อม Cable รวม: 0 เมตร (0.000 กม.)"
-    p2.font.bold = True
-    p2.font.size = Pt(16)
-    
-    # รายละเอียดจุดปัญหา
-    p3 = tf.add_paragraph()
-    p3.text = f"• รายละเอียดจุดปัญหา:"
-    p3.font.bold = True
-    p3.font.size = Pt(16)
-    
-    # พิกัดจุดต่างๆ จาก KMZ
+        p_dist.text = f"• ระยะคร่อม Cable รวม: 0 เมตร (0.000 กม.)"
+    p_dist.font.size = Pt(14)
+
+    # 4. รายละเอียดจุดปัญหา: (พร้อมขีดเส้นใต้)
+    p_detail_title = tf_scope.add_paragraph()
+    p_detail_title.text = "รายละเอียดจุดปัญหา:"
+    p_detail_title.font.bold = True
+    p_detail_title.font.underline = True
+    p_detail_title.font.size = Pt(14)
+
     for el in issue_kml_elements[:10]:
-        p_el = tf.add_paragraph()
+        p_el = tf_scope.add_paragraph()
         p_el.text = f"  - {el['name']} (Lat: {el['points'][0][0]:.5f}, Long: {el['points'][0][1]:.5f})"
         p_el.font.size = Pt(12)
 
