@@ -121,21 +121,23 @@ def parse_kml_data(file):
 
 def get_farthest_points(coordinates):
     if not coordinates or len(coordinates) < 2: return None, None
-    if len(coordinates) > 200:
-        pts = np.array(coordinates)
-        candidates = [pts[pts[:,0].argmax()], pts[pts[:,0].argmin()], pts[pts[:,1].argmax()], pts[pts[:,1].argmin()]]
-        test_points = candidates
-    else:
-        test_points = coordinates
-    max_dist = -1
-    p1_best, p2_best = None, None
-    for i in range(len(test_points)):
-        for j in range(i + 1, len(test_points)):
-            dist = (test_points[i][0] - test_points[j][0])**2 + (test_points[i][1] - test_points[j][1])**2
-            if dist > max_dist:
-                max_dist = dist
-                p1_best, p2_best = test_points[i], test_points[j]
-    return p1_best, p2_best
+    try:
+        if len(coordinates) > 200:
+            pts = np.array(coordinates)
+            candidates = [pts[pts[:,0].argmax()], pts[pts[:,0].argmin()], pts[pts[:,1].argmax()], pts[pts[:,1].argmin()]]
+            test_points = candidates
+        else:
+            test_points = coordinates
+        max_dist = -1
+        p1_best, p2_best = None, None
+        for i in range(len(test_points)):
+            for j in range(i + 1, len(test_points)):
+                dist = (test_points[i][0] - test_points[j][0])**2 + (test_points[i][1] - test_points[j][1])**2
+                if dist > max_dist:
+                    max_dist = dist
+                    p1_best, p2_best = test_points[i], test_points[j]
+        return p1_best, p2_best
+    except: return None, None
 
 def get_osrm_route_head_tail(start_coord, end_coord):
     if not start_coord or not end_coord: return None, 0
@@ -306,12 +308,14 @@ if uploaded_files:
 for data in st.session_state.export_data:
     zoom_bounds.append([data['lat'], data['lon']])
 
-# --- FIX 313: ปรับปรุงการเช็ค Routing ให้ปลอดภัยขึ้น ---
+# --- FIX LOGIC: ตรวจสอบพิกัดก่อน Routing ---
 route_coords, route_distance = None, 0
-if kml_points_pool: # เช็คว่ามีข้อมูลพิกัดใน Pool ก่อน
-    head_p, tail_p = get_farthest_points(kml_points_pool)
-    if head_p is not None and tail_p is not None:
-        route_coords, route_distance = get_osrm_route_head_tail(head_p, tail_p)
+if kml_points_pool:
+    try:
+        f_points = get_farthest_points(kml_points_pool)
+        if f_points and f_points[0] is not None and f_points[1] is not None:
+            route_coords, route_distance = get_osrm_route_head_tail(f_points[0], f_points[1])
+    except: pass
 
 # --- แสดงผลแผนที่ ---
 if uploaded_files or kml_elements or yellow_elements:
@@ -343,7 +347,7 @@ if uploaded_files or kml_elements or yellow_elements:
     if zoom_bounds: m.fit_bounds(zoom_bounds, padding=[50, 50])
     st_folium(m, height=1200, use_container_width=True, key="survey_map")
 
-# --- Section 3: PPTX Report ---
+# --- Section 3: PPTX Report (แก้ไขให้ปุ่มกลับมาแสดง) ---
 st.markdown("<hr>", unsafe_allow_html=True)
 st.subheader("📄 3. สร้างรายงาน PowerPoint")
 col_c1, col_c2 = st.columns(2)
@@ -351,8 +355,11 @@ with col_c1:
     cable_type = st.selectbox("เลือก Type Cable", ["4", "6", "12", "24", "48", "96"])
     map_cap = st.file_uploader("อัปโหลดรูป Capture แผนที่", type=['jpg','png'])
 
-if map_cap and st.session_state.export_data:
+# แสดงปุ่มหากมีการอัปโหลดรูป Capture แผนที่
+if map_cap:
     with col_c2:
         if st.button("🚀 ดาวน์โหลดรายงาน PPTX"):
-            pptx_data = create_summary_pptx(map_cap.getvalue(), st.session_state.export_data, cable_type, route_distance, kml_elements)
+            # แม้ไม่มีรูปถ่ายสำรวจ ก็ให้ออกรายงานได้ (เป็น List ว่าง)
+            survey_data = st.session_state.export_data if st.session_state.export_data else []
+            pptx_data = create_summary_pptx(map_cap.getvalue(), survey_data, cable_type, route_distance, kml_elements)
             st.download_button("📥 คลิกเพื่อดาวน์โหลด", data=pptx_data, file_name=f"Cable_Survey_{cable_type}C.pptx")
