@@ -368,6 +368,7 @@ st.set_page_config(page_title="AI Cable Survey", layout="wide")
 
 joker_base64 = get_image_base64_from_drive("1_G_r4yKyBA_vv3Nf8SdFpQ8UKv4bPLBr")
 
+# สร้าง CSS อัตโนมัติ (ใส่รูป Joker เป็นพื้นหลังของปุ่ม ดาวน์โหลด)
 custom_css = f"""
 <style>
     .stApp {{ background: linear-gradient(120deg, #FFF5ED 0%, #F0F9F1 100%); }}
@@ -375,11 +376,12 @@ custom_css = f"""
     .main-title {{ background: linear-gradient(90deg, #2D5A27 0%, #FF8C42 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-weight: 800; font-size: 2.6rem; margin: 0; }}
     .joker-icon {{ width: 100px; height: 100px; object-fit: cover; border-radius: 50%; border: 4px solid #FFFFFF; outline: 3px solid #FF8C42; }}
     
+    /* สไตล์ปุ่ม Download ให้สวยและตัวอักษรอยู่ตรงกลาง */
     .stDownloadButton>button {{ 
         background: linear-gradient(90deg, #A8E6CF 0%, #FFD3B6 100%); 
         color: #2D5A27 !important; 
         border-radius: 14px; 
-        padding: 15px 35px 15px 50px; 
+        padding: 15px 35px 15px 50px; /* เว้นที่ว่างด้านซ้ายให้รูปภาพ */
         font-weight: 800 !important; 
         width: 100%; 
         border: none;
@@ -389,6 +391,7 @@ custom_css = f"""
     }}
     .stDownloadButton>button:hover {{ transform: scale(1.02); }}
 """
+# ถ้าดึงรูปได้ ให้แทรกรูปไปในขอบปุ่ม
 if joker_base64:
     custom_css += f"""
     .stDownloadButton>button::before {{
@@ -489,7 +492,12 @@ st.subheader("📄 3. สร้างรายงาน PowerPoint")
 selected_impact_services = []
 
 col_c1, col_c2 = st.columns(2)
+
 with col_c1:
+    # 1. จองพื้นที่ว่าง (Placeholder) ไว้แสดงข้อความแจ้งเตือนด้านบนสุด
+    warning_placeholder = st.empty()
+    
+    # 2. ข้อมูลอื่นๆ ตามลำดับ
     cable_type = st.selectbox("เลือก Type Cable", ["4", "6", "12", "24", "48", "96"])
     
     st.markdown("<b>⚠️ Service ที่กระทบ</b>", unsafe_allow_html=True)
@@ -516,12 +524,12 @@ with col_c1:
         dwdm_text = st.text_input("ระบุรายละเอียด DWDM:", key="dwdm_text")
         selected_impact_services.append(f"DWDM ({dwdm_text})" if dwdm_text else "DWDM")
         
-    # ย้ายมาไว้ข้างล่างสุดของฝั่งซ้าย
+    # 3. อัปโหลดแผนที่มาไว้ด้านล่าง Service ที่กระทบ
     map_cap = st.file_uploader("อัปโหลดรูป Capture แผนที่", type=['jpg','png'])
 
-with col_c2:
+    # 4. ปุ่มดาวน์โหลดแสดงด้านล่างสุดของฝั่งซ้าย (เมื่ออัปโหลดรูปแล้ว)
     if not map_cap:
-        st.info("📌 กรุณาอัปโหลดรูป **Capture แผนที่** ทางด้านซ้ายก่อน ปุ่มดาวน์โหลดรายงานถึงจะแสดงขึ้นมาครับ")
+        warning_placeholder.info("📌 กรุณาอัปโหลดรูป **Capture แผนที่** ทางด้านซ้ายก่อน ปุ่มดาวน์โหลดรายงานถึงจะแสดงขึ้นมาครับ")
     else:
         try:
             bg_template_id = "1EqtiR6CVnsbsVIg5Gk5j1v901YXYzjkz"
@@ -536,6 +544,9 @@ with col_c2:
                 selected_impact_services, 
                 template_bytes
             )
+            
+            # เว้นระยะห่างก่อนปุ่มดาวน์โหลดนิดหน่อย
+            st.markdown("<br>", unsafe_allow_html=True)
             
             st.download_button(
                 label="ดาวน์โหลดรายงาน PPTX", 
