@@ -18,6 +18,7 @@ from google import genai
 from google.genai import types
 import zipfile
 from lxml import etree
+import math
 
 # แก้ไขปัญหา SSL
 ssl._create_default_https_context = ssl._create_unverified_context
@@ -32,7 +33,7 @@ def load_ocr():
         os.makedirs(model_path)
     return easyocr.Reader(['en'], gpu=False, model_storage_directory=model_path)
 
-# --- 2. ฟังก์ชันช่วยจัดการข้อมูล ---
+# --- 2. ฟังก์ชันช่วยดึงรูปภาพ Joker ---
 def get_image_base64_from_drive(file_id):
     try:
         url = f"https://drive.google.com/uc?export=download&id={file_id}"
@@ -42,6 +43,7 @@ def get_image_base64_from_drive(file_id):
     except Exception: return None
     return None
 
+# --- 3. ฟังก์ชันวิเคราะห์สาเหตุด้วย AI ---
 def analyze_cable_issue(image_bytes):
     try:
         response = client.models.generate_content(
@@ -56,6 +58,7 @@ def analyze_cable_issue(image_bytes):
         return response.text.strip()
     except: return "วิเคราะห์ไม่ได้"
 
+# --- 4. ฟังก์ชันจัดการพิกัด ---
 def get_lat_lon_exif(image):
     try:
         exif = image._getexif()
@@ -73,11 +76,62 @@ def get_lat_lon_exif(image):
                dms_to_decimal(gps_info['GPSLongitude'], gps_info['GPSLongitudeRef'])
     except: return None, None
 
-# --- 3. ฟังก์ชันคำนวณเส้นทางเดิน (OSRM Walking) ---
-def get_osrm_route(p1, p2):
-    """คำนวณเส้นทางเดินระหว่าง 2 จุดที่เลือก (ย้อนศรได้)"""
-    if not p1 or not p2: return None, 0
-    coords_str = f"{p1[1]},{p1[0]};{p2[1]},{p2[0]}"
+def get_lat_lon_ocr(image):
+    try:
+        reader = load_ocr() 
+        img_for_ocr = image.copy()
+        img_for_ocr.thumbnail((1000, 1000)) 
+        img_np = np.array(img_for_ocr)
+        results = reader.readtext(img_np, paragraph=True)
+        full_text = " ".join([res[1] for res in results])
+        match = re.search(r'(\d+\.\d+)\s*[nN]\s+(\d+\.\d+)\s*[eE]', full_text)
+        if match: return float(match.group(1)), float(match.group(2))
+    except: pass
+    return None, None
+
+# --- ฟังก์ชันอ่านไฟล์ KML/KMZ ---
+def parse_kml_data(file):
+    elements = []
+    points_pool = []
+    try:
+        if file.name.endswith('.kmz'):
+            with zipfile.ZipFile(file) as z:
+                kml_filename = [n for n in z.namelist() if n.endswith('.kml')][0]
+                content = z.read(kml_filename)
+        else:
+            content = file.getvalue()
+        root = etree.fromstring(content)
+        ns = {'kml': 'http://www.opengis.net/kml/2.2', 'mwm': 'https://maps.me', 'earth': 'http://earth.google.com/kml/2.2'}
+        placemarks = root.xpath('.//kml:Placemark | .//earth:Placemark', namespaces=ns)
+        for pm in placemarks:
+            name_node = pm.xpath('kml:name/text() | earth:name/text()', namespaces=ns)
+            custom_name = pm.xpath('.//mwm:customName/mwm:lang[@code="default"]/text()', namespaces=ns)
+            final_name = custom_name[0].strip() if custom_name else (name_node[0].strip() if name_node else "ไม่ระบุชื่อ")
+            coords = pm.xpath('.//kml:coordinates/text() | .//earth:coordinates/text()', namespaces=ns)
+            if coords:
+                pts = [[float(c.split(',')[1]), float(c.split(',')[0])] for c in coords[0].strip().split()]
+                elements.append({'name': final_name, 'points': pts, 'is_point': len(pts) == 1})
+                for p in pts: points_pool.append(p)
+        return elements, points_pool
+    except: return [], []
+
+def get_farthest_points(coordinates):
+    if not coordinates or len(coordinates) < 2: return None, None
+    max_dist = -1
+    p1_best, p2_best = None, None
+    for i in range(len(coordinates)):
+        for j in range(i + 1, len(coordinates)):
+            lat1, lon1 = coordinates[i]
+            lat2, lon2 = coordinates[j]
+            dist = (lat1 - lat2)**2 + (lon1 - lon2)**2
+            if dist > max_dist:
+                max_dist = dist
+                p1_best, p2_best = coordinates[i], coordinates[j]
+    return p1_best, p2_best
+
+def get_osrm_route_head_tail(start_coord, end_coord):
+    if not start_coord or not end_coord: return None, 0
+    coords_str = f"{start_coord[1]},{start_coord[0]};{end_coord[1]},{end_coord[0]}"
     url = f"http://router.project-osrm.org/route/v1/walking/{coords_str}?overview=full&geometries=geojson"
     try:
         r = requests.get(url, timeout=5)
@@ -85,13 +139,15 @@ def get_osrm_route(p1, p2):
             data = r.json()
             if "routes" in data and len(data["routes"]) > 0:
                 route = data["routes"][0]
-                return [[lat, lon] for lon, lat in route["geometry"]["coordinates"]], route["distance"]
+                geometry = route["geometry"]["coordinates"]
+                distance = route["distance"]
+                folium_coords = [[lat, lon] for lon, lat in geometry]
+                return folium_coords, distance
     except: pass
     return None, 0
 
-# --- 4. ฟังก์ชันสร้าง Label & Icons ---
 def create_div_label(name):
-    return f'<div style="font-size: 11px; font-weight: 800; color: #D9534F; text-shadow: 2px 2px 4px white;">{name}</div>'
+    return f'''<div style="font-size: 11px; font-weight: 800; color: #D9534F; white-space: nowrap; transform: translate(-50%, -150%); text-shadow: 2px 2px 4px white; font-family: 'Inter', sans-serif;">{name}</div>'''
 
 def img_to_custom_icon(img, issue_text):
     img_resized = img.copy()
@@ -100,141 +156,158 @@ def img_to_custom_icon(img, issue_text):
     img_resized.save(buf, format="JPEG", quality=70)
     img_str = base64.b64encode(buf.getvalue()).decode()
     return f'''
-        <div style="background: white; padding: 5px; border-radius: 10px; border: 2px solid #FF8C42; transform: translate(-50%, -100%);">
-            <div style="font-size: 10px; font-weight: bold; text-align: center; color: #2D5A27;">{issue_text}</div>
-            <img src="data:image/jpeg;base64,{img_str}" style="width: 120px; border-radius: 4px;">
+        <div style="position: relative; width: fit-content; background-color: white; padding: 5px; border-radius: 12px; box-shadow: 0px 8px 24px rgba(0,0,0,0.12); border: 2px solid #FF8C42; transform: translate(-50%, -100%); margin-top: -10px;">
+            <div style="font-size: 11px; font-weight: 700; color: #2D5A27; margin-bottom: 4px; text-align: center;">{issue_text}</div>
+            <img src="data:image/jpeg;base64,{img_str}" style="max-width: 140px; display: block; border-radius: 4px;">
+            <div style="position: absolute; bottom: -10px; left: 50%; transform: translateX(-50%); width: 0; height: 0; border-left: 10px solid transparent; border-right: 10px solid transparent; border-top: 10px solid #FF8C42;"></div>
         </div>
     '''
 
-# --- 5. PowerPoint Export ---
 def create_summary_pptx(map_image_bytes, image_list):
     prs = Presentation()
     prs.slide_width, prs.slide_height = Inches(10), Inches(5.625)
     if map_image_bytes:
-        slide = prs.slides.add_slide(prs.slide_layouts[6])
-        slide.shapes.add_picture(BytesIO(map_image_bytes), 0, 0, width=prs.slide_width, height=prs.slide_height)
-    output = BytesIO()
-    prs.save(output)
+        slide1 = prs.slides.add_slide(prs.slide_layouts[6])
+        slide1.shapes.add_picture(BytesIO(map_image_bytes), 0, 0, width=prs.slide_width, height=prs.slide_height)
+    if image_list:
+        slide2 = prs.slides.add_slide(prs.slide_layouts[6])
+        cols, rows = 4, 2
+        img_w, img_h = Inches(2.1), Inches(1.5)
+        margin_x = (prs.slide_width - (img_w * cols)) / (cols + 1)
+        margin_y = (prs.slide_height - (img_h * rows + Inches(1.0))) / (rows + 1)
+        for i, item in enumerate(image_list[:8]):
+            curr_row, curr_col = i // cols, i % cols
+            x, y = margin_x + (curr_col * (img_w + margin_x)), margin_y + (curr_row * (img_h + margin_y + Inches(0.5)))
+            image = item['img_obj'].copy()
+            target_ratio = img_w / img_h
+            w_px, h_px = image.size
+            if (w_px/h_px) > target_ratio:
+                new_w = h_px * target_ratio
+                left = (w_px - new_w) / 2
+                image = image.crop((left, 0, left + new_w, h_px))
+            else:
+                new_h = w_px / target_ratio
+                top = (h_px - new_h) / 2
+                image = image.crop((0, top, w_px, top + new_h))
+            buf = BytesIO(); image.save(buf, format="JPEG"); buf.seek(0)
+            slide2.shapes.add_picture(buf, x, y, width=img_w, height=img_h)
+            txt_box = slide2.shapes.add_textbox(x, y + img_h + Inches(0.05), img_w, Inches(0.6))
+            tf = txt_box.text_frame
+            tf.word_wrap = True
+            p1 = tf.paragraphs[0]; p1.text = f"สาเหตุ: {item['issue']}"; p1.font.size = Pt(8); p1.font.bold = True
+            p2 = tf.add_paragraph(); p2.text = f"Lat: {item['lat']:.5f}\nLong: {item['lon']:.5f}"; p2.font.size = Pt(7)
+    output = BytesIO(); prs.save(output)
     return output.getvalue()
 
-# --- 6. Main Streamlit UI ---
+# --- 8. UI Layout ---
 st.set_page_config(page_title="AI Cable Survey", layout="wide")
-
-# Session State สำหรับเก็บจุดหัว-ท้ายที่คลิกเลือกเอง
-if 'manual_points' not in st.session_state: st.session_state.manual_points = []
-if 'export_data' not in st.session_state: st.session_state.export_data = []
-
 st.markdown("""<style>
-    .stApp { background: #FDFCFB; }
-    .header-box { padding: 20px; background: white; border-radius: 20px; border-bottom: 5px solid #FF8C42; margin-bottom: 25px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); }
+    .stApp { background: linear-gradient(120deg, #FFF5ED 0%, #F0F9F1 100%); }
+    .header-container { display: flex; align-items: center; justify-content: space-between; padding: 25px; background: white; border-radius: 24px; border-bottom: 5px solid #FF8C42; margin-bottom: 30px; }
+    .main-title { background: linear-gradient(90deg, #2D5A27 0%, #FF8C42 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-weight: 800; font-size: 2.6rem; margin: 0; }
+    .joker-icon { width: 100px; height: 100px; object-fit: cover; border-radius: 50%; border: 4px solid #FFFFFF; outline: 3px solid #FF8C42; }
+    .stButton>button { background: #2D5A27; color: white; border-radius: 14px; padding: 12px 35px; font-weight: 600; }
 </style>""", unsafe_allow_html=True)
 
-# Header
 joker_base64 = get_image_base64_from_drive("1_G_r4yKyBA_vv3Nf8SdFpQ8UKv4bPLBr")
-st.markdown(f'''<div class="header-box"><div style="display: flex; align-items: center; justify-content: space-between;">
-    <div><h1 style="margin:0; color: #2D5A27;">AI Cable Plotter</h1><p style="margin:0; color: #718096; font-weight: 600;">By Joker EN-NMA | คลิกเลือกจุดหัว-ท้ายบนแผนที่เพื่อวัดระยะ</p></div>
-    {"<img src='data:image/png;base64,"+joker_base64+"' style='width:80px; border-radius:50%; border: 3px solid #FF8C42;'>" if joker_base64 else ""}
-</div></div>''', unsafe_allow_html=True)
+header_html = f'''<div class="header-container"><div><h1 class="main-title">AI Cable Plotter</h1><p style="margin:0; color: #718096; font-weight: 600;">By Joker EN-NMA</p></div>
+{"<img src='data:image/png;base64,"+joker_base64+"' class='joker-icon'>" if joker_base64 else ""}</div>'''
+st.markdown(header_html, unsafe_allow_html=True)
 
-# Sidebar
-with st.sidebar:
-    st.header("⚙️ เมนูควบคุม")
-    if st.button("🗑️ ล้างจุดหัว-ท้ายที่เลือกไว้"):
-        st.session_state.manual_points = []
-        st.rerun()
-    st.divider()
-    kml_file = st.file_uploader("🌐 อัปโหลด KML/KMZ", type=['kml', 'kmz'])
-    uploaded_files = st.file_uploader("📁 อัปโหลดรูปภาพสำรวจ", type=['jpg','jpeg','png'], accept_multiple_files=True)
+# --- 9. เมนู KML/KMZ (รองรับ 2 ชุด) ---
+st.subheader("🌐 1. ข้อมูลโครงข่าย & จุดติดตั้ง (KML/KMZ)")
+col_kml1, col_kml2 = st.columns(2)
+with col_kml1:
+    kml_file = st.file_uploader("อัปโหลดไฟล์ KML หรือ KMZ (ชุดหลัก - สีแดง)", type=['kml', 'kmz'])
+with col_kml2:
+    kml_file_yellow = st.file_uploader("อัปโหลดไฟล์ KML หรือ KMZ (ชุดเสริม - สีเหลือง)", type=['kml', 'kmz'])
 
-# Logic: KML/KMZ
 kml_elements = []
-if kml_file:
-    try:
-        if kml_file.name.endswith('.kmz'):
-            with zipfile.ZipFile(kml_file) as z:
-                kml_filename = [n for n in z.namelist() if n.endswith('.kml')][0]
-                content = z.read(kml_filename)
-        else: content = kml_file.getvalue()
-        root = etree.fromstring(content)
-        ns = {'kml': 'http://www.opengis.net/kml/2.2'}
-        placemarks = root.xpath('.//kml:Placemark', namespaces=ns)
-        for pm in placemarks:
-            name = pm.xpath('kml:name/text()', namespaces=ns)
-            coords = pm.xpath('.//kml:coordinates/text()', namespaces=ns)
-            if coords:
-                pts = [[float(c.split(',')[1]), float(c.split(',')[0])] for c in coords[0].strip().split()]
-                kml_elements.append({'name': name[0] if name else "Point", 'points': pts, 'is_point': len(pts) == 1})
-    except: pass
+kml_points_pool = []
+yellow_elements = []
+all_bounds_for_zoom = []
 
-# Logic: รูปภาพ
+if kml_file:
+    kml_elements, kml_points_pool = parse_kml_data(kml_file)
+    for el in kml_elements: all_bounds_for_zoom.extend(el['points'])
+
+if kml_file_yellow:
+    yellow_elements, _ = parse_kml_data(kml_file_yellow)
+    for el in yellow_elements: all_bounds_for_zoom.extend(el['points'])
+
+st.markdown("<hr>", unsafe_allow_html=True)
+
+# --- 10. ส่วนรูปถ่ายสำรวจ ---
+uploaded_files = st.file_uploader("📁 2. อัปโหลดรูปภาพสำรวจ", type=['jpg','jpeg','png'], accept_multiple_files=True)
+if 'export_data' not in st.session_state: st.session_state.export_data = []
+
 if uploaded_files:
     current_hash = "".join([f.name + str(f.size) for f in uploaded_files])
     if 'last_hash' not in st.session_state or st.session_state.last_hash != current_hash:
         st.session_state.export_data = []
         st.session_state.last_hash = current_hash
-        for f in uploaded_files:
+    for i, f in enumerate(uploaded_files):
+        if i >= len(st.session_state.export_data):
             raw_data = f.getvalue()
             raw_img = Image.open(BytesIO(raw_data))
             img_st = ImageOps.exif_transpose(raw_img)
             lat, lon = get_lat_lon_exif(raw_img)
+            if lat is None: lat, lon = get_lat_lon_ocr(img_st)
             if lat:
                 issue = analyze_cable_issue(raw_data)
                 st.session_state.export_data.append({'img_obj': img_st, 'issue': issue, 'lat': lat, 'lon': lon})
+                all_bounds_for_zoom.append([lat, lon])
 
-# --- คำนวณเส้นทางเดิน (Walking) จากจุดที่เลือกเอง ---
-manual_route, manual_dist = None, 0
-if len(st.session_state.manual_points) == 2:
-    manual_route, manual_dist = get_osrm_route(st.session_state.manual_points[0], st.session_state.manual_points[1])
+# Routing Logic (เฉพาะชุดหลัก)
+route_coords, route_distance = None, 0
+head_point, tail_point = get_farthest_points(kml_points_pool)
+if head_point and tail_point:
+    route_coords, route_distance = get_osrm_route_head_tail(head_point, tail_point)
 
 # --- แสดงผลแผนที่ ---
-st.subheader("🗺️ แผนที่สำรวจ (นครราชสีมา - ชัยภูมิ)")
+if uploaded_files or kml_elements or yellow_elements:
+    m = folium.Map(location=[13.75, 100.5], zoom_start=17, tiles="https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}", attr="Google", control_scale=True)
+    
+    # 1. วาดเส้นทาง Route (จากชุดหลัก)
+    if route_coords:
+        folium.PolyLine(route_coords, color="#007BFF", weight=5, opacity=0.8, dash_array='10, 10').add_to(m)
+        st.info(f"📍 **ระยะทางโครงข่ายหลัก:** {route_distance/1000:.3f} กม. ({route_distance:,.0f} เมตร)")
 
-# แสดงสถานะจุดที่เลือก
-if len(st.session_state.manual_points) == 1:
-    st.warning("📍 เลือกจุด 'หัว' แล้ว... กรุณาคลิกเลือกจุด 'ท้าย' บนแผนที่")
-elif len(st.session_state.manual_points) == 2:
-    st.success(f"📏 ระยะทางเดิน (หัว-ท้าย): {manual_dist:,.2f} เมตร ({manual_dist/1000:.3f} กม.)")
+    # 2. วาดชุดสีเหลือง (ชุดเสริม - โชว์อย่างเดียว)
+    for elem in yellow_elements:
+        if elem['is_point']:
+            folium.Marker(elem['points'][0], icon=folium.Icon(color='orange', icon='info-sign')).add_to(m)
+        else:
+            folium.PolyLine(elem['points'], color="#FFD700", weight=4, opacity=0.8).add_to(m)
 
-# ตั้งค่าแผนที่เริ่มต้นไปที่โคราช-ชัยภูมิ
-m = folium.Map(location=[15.3, 101.8], zoom_start=9, 
-               tiles="https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}", attr="Google")
+    # 3. วาดชุดสีแดง (ชุดหลัก)
+    for elem in kml_elements:
+        if elem['is_point']:
+            folium.Marker(elem['points'][0], icon=folium.Icon(color='red', icon='info-sign')).add_to(m)
+            folium.Marker(elem['points'][0], icon=folium.DivIcon(html=create_div_label(elem['name']))).add_to(m)
+        else:
+            folium.PolyLine(elem['points'], color="gray", weight=2, opacity=0.4, dash_array='5').add_to(m)
 
-# 1. วาดเส้นทางที่คำนวณจากจุดหัว-ท้ายที่เลือกเอง (สีแดง)
-if manual_route:
-    folium.PolyLine(manual_route, color="#D9534F", weight=6, opacity=0.9, tooltip=f"ระยะทาง: {manual_dist:,.0f} ม.").add_to(m)
+    # 4. วาด Marker รูปถ่าย
+    for data in st.session_state.export_data:
+        folium.Marker([data['lat'], data['lon']], icon=folium.DivIcon(html=img_to_custom_icon(data['img_obj'], data['issue']))).add_to(m)
 
-# 2. วาด Marker จุดหัว-ท้าย (เลข 1 และ 2)
-for i, pt in enumerate(st.session_state.manual_points):
-    color = 'green' if i == 0 else 'red'
-    folium.Marker(pt, icon=folium.Icon(color=color, icon='info-sign'), popup=f"จุดที่ {i+1}").add_to(m)
+    m.add_child(MeasureControl(position='topright', primary_length_unit='meters'))
+    
+    # Auto Zoom
+    if all_bounds_for_zoom:
+        m.fit_bounds(all_bounds_for_zoom, padding=[50, 50])
+    
+    st_folium(m, height=900, use_container_width=True, key="survey_map")
 
-# 3. วาด Marker รูปภาพสำรวจ
-for data in st.session_state.export_data:
-    folium.Marker([data['lat'], data['lon']], icon=folium.DivIcon(html=img_to_custom_icon(data['img_obj'], data['issue']))).add_to(m)
-
-# 4. วาดเส้นโครงข่าย KML (สีเทาจาง)
-for elem in kml_elements:
-    if not elem['is_point']:
-        folium.PolyLine(elem['points'], color="gray", weight=2, opacity=0.4).add_to(m)
-
-m.add_child(MeasureControl(position='topright'))
-
-# Render และดักจับการคลิกเพื่อปักจุดหัว-ท้าย
-map_out = st_folium(m, height=750, use_container_width=True, key="main_map")
-
-if map_out and map_out.get("last_clicked"):
-    new_pt = [map_out["last_clicked"]["lat"], map_out["last_clicked"]["lng"]]
-    # ถ้าเลือกครบ 2 จุดแล้ว คลิกครั้งต่อไปจะเริ่มนับใหม่ (Reset)
-    if len(st.session_state.manual_points) >= 2:
-        st.session_state.manual_points = [new_pt]
-    elif not st.session_state.manual_points or new_pt != st.session_state.manual_points[-1]:
-        st.session_state.manual_points.append(new_pt)
-    st.rerun()
-
-# --- Export ---
-st.divider()
+st.markdown("<hr>", unsafe_allow_html=True)
 st.subheader("📄 3. สร้างรายงาน PowerPoint")
-map_cap = st.file_uploader("📸 Capture แผนที่มาวาง", type=['jpg','png'])
-if map_cap and st.button("🚀 ดาวน์โหลดรายงาน PPTX"):
-    pptx = create_summary_pptx(map_cap.getvalue(), st.session_state.export_data)
-    st.download_button("📥 Click", data=pptx, file_name="Cable_Report.pptx")
+col1, col2 = st.columns([1, 1])
+with col1:
+    map_cap = st.file_uploader("อัปโหลดรูป Capture แผนที่", type=['jpg','png'])
+if map_cap and st.session_state.export_data:
+    with col2:
+        st.write(""); 
+        if st.button("🚀 สรุปรายงานและดาวน์โหลดไฟล์ PPTX"):
+            pptx_data = create_summary_pptx(map_cap.getvalue(), st.session_state.export_data)
+            st.download_button("📥 คลิกเพื่อดาวน์โหลดรายงาน", data=pptx_data, file_name="Cable_AI_Report.pptx")
