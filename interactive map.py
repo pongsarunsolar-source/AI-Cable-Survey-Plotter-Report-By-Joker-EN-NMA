@@ -128,7 +128,8 @@ def get_farthest_points(coordinates):
     except: return None, None
 
 def get_osrm_route_head_tail(start_coord, end_coord):
-    if not start_coord or not end_coord: return None, 0
+    # แก้ไขบั๊ก image_12383d.png และ image_123bfb.png: ตรวจสอบค่าพิกัดก่อนประมวลผล
+    if start_coord is None or end_coord is None: return None, 0
     url = f"http://router.project-osrm.org/route/v1/walking/{start_coord[1]},{start_coord[0]};{end_coord[1]},{end_coord[0]}?overview=full&geometries=geojson"
     try:
         r = requests.get(url, timeout=5)
@@ -156,7 +157,7 @@ def img_to_custom_icon(img, issue_text):
         </div>
     '''
 
-# --- 7. ฟังก์ชันสร้างรายงาน PowerPoint (Final Setup) ---
+# --- 7. ฟังก์ชันสร้างรายงาน PowerPoint (Topology Overall Update) ---
 def create_summary_pptx(map_image_bytes, image_list, cable_type, route_distance, issue_kml_elements):
     prs = Presentation()
     prs.slide_width, prs.slide_height = Inches(10), Inches(5.625)
@@ -179,21 +180,19 @@ def create_summary_pptx(map_image_bytes, image_list, cable_type, route_distance,
         p_el.text = f"  - {el['name']} (Lat: {el['points'][0][0]:.5f}, Long: {el['points'][0][1]:.5f})"
         p_el.font.size = Pt(12)
 
-    # --- หน้า 2: Topology Overall (ภาพเต็มหน้า + หัวข้อขีดเส้นใต้) ---
+    # --- หน้า 2: Topology Overall (ปรับปรุง: ภาพเต็มจอ + หัวข้อขีดเส้นใต้) ---
     if map_image_bytes:
         slide1 = prs.slides.add_slide(prs.slide_layouts[6])
-        # 1. วางรูป Capture ให้เต็มหน้าจอ (ตำแหน่ง 0,0)
         slide1.shapes.add_picture(BytesIO(map_image_bytes), 0, 0, width=prs.slide_width, height=prs.slide_height)
         
-        # 2. วาง Title: Topology Overall มุมบนซ้าย + ขีดเส้นใต้
+        # วางหัวข้อ Topology Overall มุมบนซ้าย + ขีดเส้นใต้
         title_box1 = slide1.shapes.add_textbox(Inches(0.2), Inches(0.1), Inches(4), Inches(0.5))
         p_title1 = title_box1.text_frame.paragraphs[0]
         p_title1.text = "Topology Overall"
-        p_title1.font.bold = True
-        p_title1.font.size = Pt(24)
+        p_title1.font.bold, p_title1.font.size = True, Pt(24)
         p_title1.font.underline = True # ขีดเส้นใต้
 
-    # --- หน้า 3: รูปภาพแสดงจุดที่มีปัญหา (Title ด้านบน) ---
+    # --- หน้า 3: รูปภาพแสดงจุดที่มีปัญหา ---
     if image_list:
         slide2 = prs.slides.add_slide(prs.slide_layouts[6])
         t2_box = slide2.shapes.add_textbox(Inches(0.5), Inches(0.2), Inches(9), Inches(0.5))
@@ -241,17 +240,17 @@ st.markdown(f'''<div class="header-container"><div><h1 class="main-title">AI Cab
 
 # --- 9. Logic ส่วนควบคุม ---
 st.subheader("🌐 1. ข้อมูลโครงข่าย & จุดติดตั้ง (KML/KMZ)")
-kml_file_yellow = st.file_uploader("Import KMZ - Overall (ภาพรวมแผนที่)", type=['kml', 'kmz'])
-kml_file = st.file_uploader("Import KMZ - พิกัดที่มีปัญหาและเสนอคร่อม cable", type=['kml', 'kmz'])
+kml_file_overall = st.file_uploader("Import KMZ - Overall (ภาพรวมแผนที่)", type=['kml', 'kmz'])
+kml_file_issue = st.file_uploader("Import KMZ - พิกัดที่มีปัญหาและเสนอคร่อม cable", type=['kml', 'kmz'])
 
 zoom_bounds = []
 y_elements, k_elements, k_pool = [], [], []
 
-if kml_file_yellow:
-    y_elements, _ = parse_kml_data(kml_file_yellow)
+if kml_file_overall:
+    y_elements, _ = parse_kml_data(kml_file_overall)
     for el in y_elements: zoom_bounds.extend(el['points'])
-if kml_file:
-    k_elements, k_pool = parse_kml_data(kml_file)
+if kml_file_issue:
+    k_elements, k_pool = parse_kml_data(kml_file_issue)
     for el in k_elements: zoom_bounds.extend(el['points'])
 
 st.subheader("📁 2. อัปโหลดรูปภาพสำรวจ")
@@ -261,8 +260,7 @@ if 'export_data' not in st.session_state: st.session_state.export_data = []
 if uploaded_files:
     current_hash = "".join([f.name + str(f.size) for f in uploaded_files])
     if 'last_hash' not in st.session_state or st.session_state.last_hash != current_hash:
-        st.session_state.export_data = []
-        st.session_state.last_hash = current_hash
+        st.session_state.export_data, st.session_state.last_hash = [], current_hash
         for f in uploaded_files:
             raw_data = f.getvalue(); raw_img = Image.open(BytesIO(raw_data))
             lat, lon = get_lat_lon_exif(raw_img)
@@ -272,10 +270,14 @@ if uploaded_files:
                 st.session_state.export_data.append({'img_obj': ImageOps.exif_transpose(raw_img), 'issue': issue, 'lat': lat, 'lon': lon})
                 zoom_bounds.append([lat, lon])
 
+# แก้ไขบั๊ก image_11c33e.png: ตรวจสอบข้อมูลก่อนคำนวณระยะทาง
 r_coords, r_dist = None, 0
-if k_pool:
-    p1, p2 = get_farthest_points(k_pool)
-    r_coords, r_dist = get_osrm_route_head_tail(p1, p2)
+if k_pool and len(k_pool) >= 2:
+    try:
+        p1, p2 = get_farthest_points(k_pool)
+        if p1 is not None and p2 is not None:
+            r_coords, r_dist = get_osrm_route_head_tail(p1, p2)
+    except: pass
 
 if uploaded_files or k_elements or y_elements:
     m = folium.Map(location=[13.75, 100.5], zoom_start=17, tiles=None)
