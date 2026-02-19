@@ -3,7 +3,7 @@ import os
 import streamlit as st
 import folium
 from streamlit_folium import st_folium
-from folium.plugins import MeasureControl, Fullscreen, MarkerCluster # นำเข้า MarkerCluster เพิ่ม
+from folium.plugins import MeasureControl, Fullscreen, MarkerCluster
 from PIL import Image, ImageOps
 from PIL.ExifTags import TAGS, GPSTAGS
 import base64
@@ -98,7 +98,7 @@ def get_lat_lon_ocr(image):
     try:
         reader = load_ocr() 
         img_for_ocr = image.copy()
-        img_for_ocr.thumbnail((1000, 1000)) 
+        img_for_ocr.thumbnail((800, 800)) # ลดขนาดภาพลงอีกนิด ช่วยประหยัด RAM กันเว็บค้าง
         img_np = np.array(img_for_ocr.convert('RGB'))
         results = reader.readtext(img_np, paragraph=True, allowlist='0123456789.NE ne \n')
         full_text = " ".join([res[1] for res in results])
@@ -174,23 +174,8 @@ def get_osrm_route_head_tail(start_coord, end_coord):
     except: pass
     return None, 0
 
-# --- 6. ฟังก์ชันสร้าง Label ชื่อ ---
 def create_div_label(name, color="#D9534F"):
     return f'''<div style="font-size: 11px; font-weight: 800; color: {color}; white-space: nowrap; transform: translate(-50%, -150%); background-color: transparent; text-shadow: 2px 2px 4px white, -2px -2px 4px white, 2px -2px 4px white, -2px 2px 4px white; font-family: 'Inter', sans-serif;">{name}</div>'''
-
-def img_to_custom_icon(img, issue_text):
-    img_resized = img.copy()
-    img_resized.thumbnail((150, 150)) 
-    buf = BytesIO()
-    img_resized.save(buf, format="JPEG", quality=70)
-    img_str = base64.b64encode(buf.getvalue()).decode()
-    return f'''
-        <div style="position: relative; width: fit-content; background-color: white; padding: 5px; border-radius: 12px; box-shadow: 0px 8px 24px rgba(0,0,0,0.12); border: 2px solid #FF8C42; transform: translate(-50%, -100%); margin-top: -10px;">
-            <div style="font-size: 11px; font-weight: 700; color: #2D5A27; margin-bottom: 4px; text-align: center;">{issue_text}</div>
-            <img src="data:image/jpeg;base64,{img_str}" style="max-width: 140px; display: block; border-radius: 4px;">
-            <div style="position: absolute; bottom: -10px; left: 50%; transform: translateX(-50%); width: 0; height: 0; border-left: 10px solid transparent; border-right: 10px solid transparent; border-top: 10px solid #FF8C42;"></div>
-        </div>
-    '''
 
 # --- 7. ฟังก์ชันสร้างรายงาน PowerPoint ---
 def create_summary_pptx(map_image_bytes, image_list, cable_type, route_distance, issue_kml_elements, impact_services, template_bytes=None):
@@ -470,7 +455,7 @@ if kml_points_pool:
             route_coords, route_distance = get_osrm_route_head_tail(f_p[0], f_p[1])
     except: pass
 
-# --- การสร้างแผนที่พร้อมใช้งาน MarkerCluster ---
+# --- การสร้างแผนที่ ---
 map_orientation = "แนวนอน (Landscape)"
 if uploaded_files or kml_elements or yellow_elements:
     st.markdown("---")
@@ -495,17 +480,34 @@ if uploaded_files or kml_elements or yellow_elements:
             folium.Marker(elem['points'][0], icon=folium.DivIcon(html=create_div_label(elem['name'], "#D9534F"))).add_to(m)
         else: folium.PolyLine(elem['points'], color="gray", weight=2, opacity=0.4, dash_array='5').add_to(m)
         
-    # --- จัดกลุ่มรูปภาพด้วย MarkerCluster เพื่อป้องกันรูปทับกัน ---
-    marker_cluster = MarkerCluster(
-        name="Issue Photos",
-        overlay=True,
-        control=True,
-        icon_create_function=None
-    )
+    # --- อัปเดต: ใช้ Popup เพื่อกันรูปทับกัน ---
+    marker_cluster = MarkerCluster(name="Issue Photos").add_to(m)
+    
     for d in st.session_state.export_data: 
-        folium.Marker([d['lat'], d['lon']], icon=folium.DivIcon(html=img_to_custom_icon(d['img_obj'], d['issue']))).add_to(marker_cluster)
-    marker_cluster.add_to(m)
-    # -------------------------------------------------------------
+        # เตรียมรูปย่อสำหรับใส่ใน Popup
+        img_resized = d['img_obj'].copy()
+        img_resized.thumbnail((300, 300))
+        buf = BytesIO()
+        img_resized.save(buf, format="JPEG", quality=70)
+        img_str = base64.b64encode(buf.getvalue()).decode()
+        
+        # สร้างกล่อง HTML เล็กๆ ให้เด้งขึ้นมาตอนคลิก
+        popup_html = f'''
+            <div style="width: 220px; text-align: center; font-family: 'Inter', sans-serif;">
+                <img src="data:image/jpeg;base64,{img_str}" style="width: 100%; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);">
+                <div style="margin-top: 10px; font-size: 13px; font-weight: bold; color: #D9534F;">สาเหตุ: {d['issue']}</div>
+            </div>
+        '''
+        iframe = folium.IFrame(html=popup_html, width=240, height=260)
+        popup = folium.Popup(iframe, max_width=240)
+        
+        # สร้างหมุดสีแดงรูปกล้อง
+        folium.Marker(
+            [d['lat'], d['lon']], 
+            icon=folium.Icon(color='red', icon='camera', prefix='fa'),
+            popup=popup
+        ).add_to(marker_cluster)
+    # ----------------------------------------
 
     m.add_child(MeasureControl(position='topright', primary_length_unit='meters'))
     if zoom_bounds: m.fit_bounds(zoom_bounds, padding=[50, 50])
