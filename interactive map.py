@@ -299,7 +299,6 @@ if uploaded_files or kml_elements or yellow_elements:
             opacity=0.8, 
             dash_array='10, 10'
         ).add_to(m)
-        # เปลี่ยนชื่อ ระยะทางชุดหลัก เป็น ระยะคร่อม cable
         st.info(f"📍 ระยะคร่อม cable: {route_distance/1000:.3f} กม. ({route_distance:,.0f} เมตร)")
 
     # 1. วาดชุด Overall (สีเหลือง)
@@ -333,7 +332,10 @@ if uploaded_files or kml_elements or yellow_elements:
         for el in yellow_elements: all_yellow_pts.extend(el['points'])
         if all_yellow_pts: m.fit_bounds(all_yellow_pts, padding=[50, 50])
         
-    st_folium(m, height=900, use_container_width=True, key="survey_map")
+    # ---------------------------------------------------------
+    # ปรับความสูงของแผนที่ให้เพิ่มขึ้นเป็น 1,200 พิกเซล
+    # ---------------------------------------------------------
+    st_folium(m, height=1200, use_container_width=True, key="survey_map")
 
 st.markdown("<hr>", unsafe_allow_html=True)
 st.subheader("📄 3. สร้างรายงาน PowerPoint")
