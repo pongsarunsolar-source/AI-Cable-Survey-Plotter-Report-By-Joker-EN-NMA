@@ -3,7 +3,7 @@ import os
 import streamlit as st
 import folium
 from streamlit_folium import st_folium
-from folium.plugins import MeasureControl, Fullscreen
+from folium.plugins import MeasureControl, Fullscreen, MarkerCluster # นำเข้า MarkerCluster เพิ่ม
 from PIL import Image, ImageOps
 from PIL.ExifTags import TAGS, GPSTAGS
 import base64
@@ -337,7 +337,7 @@ def create_summary_pptx(map_image_bytes, image_list, cable_type, route_distance,
         p_title2.font.underline = True
 
         cols, rows = 4, 2
-        img_w, img_h = Inches(1.3), Inches(1.8) # ปรับเป็นแนวตั้ง Portrait
+        img_w, img_h = Inches(1.3), Inches(1.8) 
         margin_x = (Inches(7.8) - (img_w * cols)) / (cols + 1)
         margin_y = Inches(0.8) 
         
@@ -376,7 +376,6 @@ st.set_page_config(page_title="AI Cable Survey", layout="wide")
 
 joker_base64 = get_image_base64_from_drive("1_G_r4yKyBA_vv3Nf8SdFpQ8UKv4bPLBr")
 
-# สร้าง CSS อัตโนมัติ (ใส่รูป Joker เป็นพื้นหลังของปุ่ม ดาวน์โหลด)
 custom_css = f"""
 <style>
     .stApp {{ background: linear-gradient(120deg, #FFF5ED 0%, #F0F9F1 100%); }}
@@ -384,7 +383,6 @@ custom_css = f"""
     .main-title {{ background: linear-gradient(90deg, #2D5A27 0%, #FF8C42 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-weight: 800; font-size: 2.6rem; margin: 0; }}
     .joker-icon {{ width: 100px; height: 100px; object-fit: cover; border-radius: 50%; border: 4px solid #FFFFFF; outline: 3px solid #FF8C42; }}
     
-    /* สไตล์ปุ่ม Download ให้สวยและตัวอักษรอยู่ตรงกลาง */
     .stDownloadButton>button {{ 
         background: linear-gradient(90deg, #A8E6CF 0%, #FFD3B6 100%); 
         color: #2D5A27 !important; 
@@ -472,7 +470,7 @@ if kml_points_pool:
             route_coords, route_distance = get_osrm_route_head_tail(f_p[0], f_p[1])
     except: pass
 
-# --- ส่วนเพิ่มใหม่: ปุ่มสลับสัดส่วนแผนที่ ---
+# --- การสร้างแผนที่พร้อมใช้งาน MarkerCluster ---
 map_orientation = "แนวนอน (Landscape)"
 if uploaded_files or kml_elements or yellow_elements:
     st.markdown("---")
@@ -496,8 +494,19 @@ if uploaded_files or kml_elements or yellow_elements:
             folium.Marker(elem['points'][0], icon=folium.Icon(color='red')).add_to(m)
             folium.Marker(elem['points'][0], icon=folium.DivIcon(html=create_div_label(elem['name'], "#D9534F"))).add_to(m)
         else: folium.PolyLine(elem['points'], color="gray", weight=2, opacity=0.4, dash_array='5').add_to(m)
-    for d in st.session_state.export_data: folium.Marker([d['lat'], d['lon']], icon=folium.DivIcon(html=img_to_custom_icon(d['img_obj'], d['issue']))).add_to(m)
-    
+        
+    # --- จัดกลุ่มรูปภาพด้วย MarkerCluster เพื่อป้องกันรูปทับกัน ---
+    marker_cluster = MarkerCluster(
+        name="Issue Photos",
+        overlay=True,
+        control=True,
+        icon_create_function=None
+    )
+    for d in st.session_state.export_data: 
+        folium.Marker([d['lat'], d['lon']], icon=folium.DivIcon(html=img_to_custom_icon(d['img_obj'], d['issue']))).add_to(marker_cluster)
+    marker_cluster.add_to(m)
+    # -------------------------------------------------------------
+
     m.add_child(MeasureControl(position='topright', primary_length_unit='meters'))
     if zoom_bounds: m.fit_bounds(zoom_bounds, padding=[50, 50])
     st_folium(m, height=map_h, use_container_width=True, key="survey_map")
