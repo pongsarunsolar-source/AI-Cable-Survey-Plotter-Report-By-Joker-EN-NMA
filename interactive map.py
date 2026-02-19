@@ -233,7 +233,7 @@ kml_file = st.file_uploader("Import KMZ - พิกัดที่มีปั�
 kml_elements = []
 kml_points_pool = []
 yellow_elements = []
-zoom_bounds = [] # แยกตัวแปรสำหรับ Zoom ชุดหลักโดยเฉพาะ
+zoom_bounds = []
 
 if kml_file_yellow:
     yellow_elements, _ = parse_kml_data(kml_file_yellow)
@@ -264,7 +264,6 @@ if uploaded_files:
             if lat:
                 issue = analyze_cable_issue(raw_data)
                 st.session_state.export_data.append({'img_obj': img_st, 'issue': issue, 'lat': lat, 'lon': lon})
-                # ถ้ารูปถ่ายมีพิกัด ให้รวมเข้าเป็นส่วนหนึ่งของการ Zoom ด้วย
                 zoom_bounds.append([lat, lon])
 
 # Routing Logic
@@ -275,7 +274,6 @@ if head_p and tail_p:
 
 # --- แสดงผลแผนที่ ---
 if uploaded_files or kml_elements or yellow_elements:
-    # สร้าง Map แบบไม่มี Tile เริ่มต้น
     m = folium.Map(
         location=[13.75, 100.5], 
         zoom_start=17, 
@@ -283,7 +281,7 @@ if uploaded_files or kml_elements or yellow_elements:
         control_scale=True
     )
     
-    # เพิ่ม Tile Layer จางลง 60% (Opacity = 0.4)
+    # Tile Layer ความจาง 60%
     folium.TileLayer(
         tiles="https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}",
         attr="Google",
@@ -293,8 +291,17 @@ if uploaded_files or kml_elements or yellow_elements:
         control=True
     ).add_to(m)
     
+    # ---------------------------------------------------------
+    # ปรับเส้นประสีน้ำเงินเป็นสีแดงตามคำขอ
+    # ---------------------------------------------------------
     if route_coords:
-        folium.PolyLine(route_coords, color="#007BFF", weight=5, opacity=0.8, dash_array='10, 10').add_to(m)
+        folium.PolyLine(
+            route_coords, 
+            color="#FF0000", # เปลี่ยนเป็นสีแดง
+            weight=5, 
+            opacity=0.8, 
+            dash_array='10, 10'
+        ).add_to(m)
         st.info(f"📍 ระยะทางชุดหลัก: {route_distance/1000:.3f} กม. ({route_distance:,.0f} เมตร)")
 
     # 1. วาดชุด Overall (สีเหลือง)
@@ -321,10 +328,9 @@ if uploaded_files or kml_elements or yellow_elements:
 
     m.add_child(MeasureControl(position='topright', primary_length_unit='meters'))
     
-    # Auto Zoom ไปยังขอบเขตของ "พิกัดที่มีปัญหา" และ "รูปถ่าย"
+    # Auto Zoom ไปยังพิกัดที่มีปัญหา
     if zoom_bounds: 
         m.fit_bounds(zoom_bounds, padding=[50, 50])
-    # ถ้าไม่มีพิกัดมีปัญหาเลย แต่มี Overall ให้ Zoom ไปหา Overall แทน (กรณี fallback)
     elif yellow_elements:
         all_yellow_pts = []
         for el in yellow_elements: all_yellow_pts.extend(el['points'])
