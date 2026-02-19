@@ -224,13 +224,10 @@ header_html = f'''<div class="header-container"><div><h1 class="main-title">AI C
 {"<img src='data:image/png;base64,"+joker_base64+"' class='joker-icon'>" if joker_base64 else ""}</div>'''
 st.markdown(header_html, unsafe_allow_html=True)
 
-# --- 9. เมนู KML/KMZ (ปรับคำศัพท์ตามความต้องการ) ---
+# --- 9. เมนู KML/KMZ ---
 st.subheader("🌐 1. ข้อมูลโครงข่าย & จุดติดตั้ง (KML/KMZ)")
 
-# ส่วนที่ 1: ชุดเสริม (สีเหลือง) อยู่บน
 kml_file_yellow = st.file_uploader("Import KMZ - Overall (ภาพรวมแผนที่)", type=['kml', 'kmz'])
-
-# ส่วนที่ 2: ชุดหลัก (สีแดง) อยู่ล่าง
 kml_file = st.file_uploader("Import KMZ - พิกัดที่มีปัญหาและเสนอคร่อม cable", type=['kml', 'kmz'])
 
 kml_elements = []
@@ -269,7 +266,7 @@ if uploaded_files:
                 st.session_state.export_data.append({'img_obj': img_st, 'issue': issue, 'lat': lat, 'lon': lon})
                 all_bounds.append([lat, lon])
 
-# Routing Logic (เฉพาะชุดหลัก)
+# Routing Logic
 route_coords, route_distance = None, 0
 head_p, tail_p = get_farthest_points(kml_points_pool)
 if head_p and tail_p:
@@ -277,13 +274,29 @@ if head_p and tail_p:
 
 # --- แสดงผลแผนที่ ---
 if uploaded_files or kml_elements or yellow_elements:
-    m = folium.Map(location=[13.75, 100.5], zoom_start=17, tiles="https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}", attr="Google", control_scale=True)
+    # สร้าง Map โดยใช้ TileLayer ที่ปรับ Opacity เป็น 50%
+    m = folium.Map(
+        location=[13.75, 100.5], 
+        zoom_start=17, 
+        tiles=None, # ปิด tile เริ่มต้นเพื่อใส่ custom เอง
+        control_scale=True
+    )
+    
+    # เพิ่ม Google Maps Tile Layer แบบจาง 50%
+    folium.TileLayer(
+        tiles="https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}",
+        attr="Google",
+        name="Google Maps (50%)",
+        opacity=0.5, # ปรับความจางที่นี่
+        overlay=False,
+        control=True
+    ).add_to(m)
     
     if route_coords:
         folium.PolyLine(route_coords, color="#007BFF", weight=5, opacity=0.8, dash_array='10, 10').add_to(m)
         st.info(f"📍 ระยะทางชุดหลัก: {route_distance/1000:.3f} กม. ({route_distance:,.0f} เมตร)")
 
-    # 1. วาดชุด Overall (สีเหลือง) พร้อมแสดงชื่อจุด
+    # 1. Overall (สีเหลือง)
     for elem in yellow_elements:
         if elem['is_point']:
             loc = elem['points'][0]
@@ -292,7 +305,7 @@ if uploaded_files or kml_elements or yellow_elements:
         else:
             folium.PolyLine(elem['points'], color="#FFD700", weight=4, opacity=0.8).add_to(m)
 
-    # 2. วาดชุดพิกัดที่มีปัญหา (สีแดง) พร้อมแสดงชื่อจุด
+    # 2. พิกัดที่มีปัญหา (สีแดง)
     for elem in kml_elements:
         if elem['is_point']:
             loc = elem['points'][0]
@@ -301,13 +314,12 @@ if uploaded_files or kml_elements or yellow_elements:
         else:
             folium.PolyLine(elem['points'], color="gray", weight=2, opacity=0.4, dash_array='5').add_to(m)
 
-    # 3. วาดรูปถ่ายสำรวจ
+    # 3. รูปถ่ายสำรวจ
     for data in st.session_state.export_data:
         folium.Marker([data['lat'], data['lon']], icon=folium.DivIcon(html=img_to_custom_icon(data['img_obj'], data['issue']))).add_to(m)
 
     m.add_child(MeasureControl(position='topright', primary_length_unit='meters'))
     
-    # Auto Zoom
     if all_bounds: 
         m.fit_bounds(all_bounds, padding=[50, 50])
         
