@@ -33,6 +33,17 @@ def load_ocr():
         os.makedirs(model_path)
     return easyocr.Reader(['en'], gpu=False, model_storage_directory=model_path)
 
+# โหลด Template พื้นหลัง PowerPoint เก็บไว้ใน Cache จะได้ไม่ต้องโหลดใหม่ทุกรอบ
+@st.cache_data
+def load_template_bytes(file_id):
+    try:
+        url = f"https://drive.google.com/uc?export=download&id={file_id}"
+        response = requests.get(url, timeout=10)
+        if response.status_code == 200:
+            return response.content
+    except: pass
+    return None
+
 # --- 2. ฟังก์ชันช่วยดึงรูปภาพ Joker ---
 def get_image_base64_from_drive(file_id):
     try:
@@ -175,19 +186,27 @@ def img_to_custom_icon(img, issue_text):
     '''
 
 # --- 7. ฟังก์ชันสร้างรายงาน PowerPoint ---
-def create_summary_pptx(map_image_bytes, image_list, cable_type, route_distance, issue_kml_elements):
+def create_summary_pptx(map_image_bytes, image_list, cable_type, route_distance, issue_kml_elements, template_bytes=None):
     prs = Presentation()
     prs.slide_width, prs.slide_height = Inches(10), Inches(5.625)
     
+    # ฟังก์ชันเสริมสำหรับวางภาพ Background
+    def apply_background(slide):
+        if template_bytes:
+            slide.shapes.add_picture(BytesIO(template_bytes), 0, 0, width=prs.slide_width, height=prs.slide_height)
+
     # --- หน้าแรก: รายละเอียดสรุป ---
     slide0 = prs.slides.add_slide(prs.slide_layouts[6])
-    title_box = slide0.shapes.add_textbox(Inches(0.5), Inches(0.5), Inches(9), Inches(1))
+    apply_background(slide0) # ใส่พื้นหลัง AIS
+    
+    # จำกัดความกว้างให้อยู่ในพื้นที่สีขาว (7.5 นิ้ว)
+    title_box = slide0.shapes.add_textbox(Inches(0.5), Inches(0.5), Inches(7.5), Inches(1))
     p_title = title_box.text_frame.paragraphs[0]
     p_title.text = f"รายงานสรุปแนวทางแก้ไขปัญหาและเสนอคร่อม Cable ({cable_type} Core)"
     p_title.font.bold = True
     p_title.font.size = Pt(22)
     
-    info_box = slide0.shapes.add_textbox(Inches(0.5), Inches(1.5), Inches(9), Inches(3.5))
+    info_box = slide0.shapes.add_textbox(Inches(0.5), Inches(1.5), Inches(7.5), Inches(3.5))
     tf = info_box.text_frame
     tf.word_wrap = True
     
@@ -212,7 +231,9 @@ def create_summary_pptx(map_image_bytes, image_list, cable_type, route_distance,
     # --- หน้าแผนที่ (หน้า 2) ---
     if map_image_bytes:
         slide1 = prs.slides.add_slide(prs.slide_layouts[6])
-        # แสดงรูปภาพเต็มจอ
+        apply_background(slide1)
+        
+        # แสดงรูปภาพแผนที่เต็มจอ ทับพื้นหลังไปเลย
         slide1.shapes.add_picture(BytesIO(map_image_bytes), 0, 0, width=prs.slide_width, height=prs.slide_height)
         
         # เพิ่ม Title: Topology Overall (ขีดเส้นใต้ มุมบนซ้าย)
@@ -226,6 +247,7 @@ def create_summary_pptx(map_image_bytes, image_list, cable_type, route_distance,
     # --- หน้าพิกัดรูปถ่ายสำรวจ (หน้า 3) ---
     if image_list:
         slide2 = prs.slides.add_slide(prs.slide_layouts[6])
+        apply_background(slide2) # ใส่พื้นหลัง AIS
         
         # เพิ่ม Title: รูปภาพแสดงจุดที่มีปัญหา (ขีดเส้นใต้ มุมบนซ้าย)
         title_box2 = slide2.shapes.add_textbox(Inches(0.2), Inches(0.1), Inches(6), Inches(0.5))
@@ -235,10 +257,10 @@ def create_summary_pptx(map_image_bytes, image_list, cable_type, route_distance,
         p_title2.font.size = Pt(22)
         p_title2.font.underline = True
 
+        # จัด Layout Grid ให้อยู่เฉพาะในโซนสีขาว (พื้นที่กว้างประมาณ 7.8 นิ้ว)
         cols, rows = 4, 2
-        img_w, img_h = Inches(2.1), Inches(1.5)
-        margin_x = (prs.slide_width - (img_w * cols)) / (cols + 1)
-        # ปรับระยะด้านบนลงมาเพื่อไม่ให้ทับหัวข้อ
+        img_w, img_h = Inches(1.8), Inches(1.3) # ปรับขนาดรูปให้เล็กลงนิดหน่อยเพื่อให้พอดี
+        margin_x = (Inches(7.8) - (img_w * cols)) / (cols + 1)
         margin_y = Inches(0.8) 
         
         for i, item in enumerate(image_list[:8]):
@@ -257,7 +279,7 @@ def create_summary_pptx(map_image_bytes, image_list, cable_type, route_distance,
                 image = image.crop((0, top, w_px, top + new_h))
             buf = BytesIO(); image.save(buf, format="JPEG"); buf.seek(0)
             slide2.shapes.add_picture(buf, x, y, width=img_w, height=img_h)
-            txt_box = slide2.shapes.add_textbox(x, y + img_h + Inches(0.05), img_w, Inches(0.6))
+            txt_box = slide2.shapes.add_textbox(x, y + img_h + Inches(0.02), img_w, Inches(0.6))
             tf_img = txt_box.text_frame
             tf_img.word_wrap = True
             p1_img = tf_img.paragraphs[0]; p1_img.text = f"สาเหตุ: {item['issue']}"; p1_img.font.size = Pt(8); p1_img.font.bold = True
@@ -273,7 +295,7 @@ st.markdown("""<style>
     .header-container { display: flex; align-items: center; justify-content: space-between; padding: 25px; background: white; border-radius: 24px; border-bottom: 5px solid #FF8C42; margin-bottom: 30px; }
     .main-title { background: linear-gradient(90deg, #2D5A27 0%, #FF8C42 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-weight: 800; font-size: 2.6rem; margin: 0; }
     .joker-icon { width: 100px; height: 100px; object-fit: cover; border-radius: 50%; border: 4px solid #FFFFFF; outline: 3px solid #FF8C42; }
-    .stButton>button { background: #2D5A27; color: white; border-radius: 14px; padding: 12px 35px; font-weight: 600; }
+    .stButton>button { background: #2D5A27; color: white; border-radius: 14px; padding: 12px 35px; font-weight: 600; width: 100%; }
 </style>""", unsafe_allow_html=True)
 
 joker_base64 = get_image_base64_from_drive("1_G_r4yKyBA_vv3Nf8SdFpQ8UKv4bPLBr")
@@ -321,7 +343,6 @@ if uploaded_files:
 
 for data in st.session_state.export_data: zoom_bounds.append([data['lat'], data['lon']])
 
-# แก้ไขบั๊กเพื่อไม่ให้เกิด ValueError เมื่อข้อมูล KMZ ไม่ครบ
 route_coords, route_distance = None, 0
 if kml_points_pool:
     try:
@@ -361,7 +382,23 @@ if map_cap:
     with col_c2:
         if st.button("🚀 ดาวน์โหลดรายงาน PPTX"):
             try:
-                pptx_data = create_summary_pptx(map_cap.getvalue(), st.session_state.export_data, cable_type, route_distance, kml_elements)
-                st.download_button("📥 คลิกเพื่อดาวน์โหลด", data=pptx_data, file_name=f"Cable_Survey_{cable_type}C.pptx")
+                # โหลด Template รูปภาพ AIS จากลิงก์ Google Drive ที่ให้มา
+                bg_template_id = "1EqtiR6CVnsbsVIg5Gk5j1v901YXYzjkz"
+                template_bytes = load_template_bytes(bg_template_id)
+                
+                pptx_data = create_summary_pptx(
+                    map_cap.getvalue(), 
+                    st.session_state.export_data, 
+                    cable_type, 
+                    route_distance, 
+                    kml_elements, 
+                    template_bytes # ส่ง Template เข้าไป
+                )
+                st.download_button(
+                    "📥 คลิกเพื่อดาวน์โหลด", 
+                    data=pptx_data, 
+                    file_name=f"Cable_Survey_{cable_type}C.pptx",
+                    mime="application/vnd.openxmlformats-officedocument.presentationml.presentation"
+                )
             except Exception as e:
                 st.error(f"เกิดข้อผิดพลาดในการสร้างรายงาน: {e}")
