@@ -89,7 +89,7 @@ def get_lat_lon_ocr(image):
     except: pass
     return None, None
 
-# --- ฟังก์ชันอ่านไฟล์ KML/KMZ ---
+# --- 5. ฟังก์ชันอ่านไฟล์ KML/KMZ ---
 def parse_kml_data(file):
     elements = []
     points_pool = []
@@ -146,8 +146,18 @@ def get_osrm_route_head_tail(start_coord, end_coord):
     except: pass
     return None, 0
 
-def create_div_label(name):
-    return f'''<div style="font-size: 11px; font-weight: 800; color: #D9534F; white-space: nowrap; transform: translate(-50%, -150%); text-shadow: 2px 2px 4px white; font-family: 'Inter', sans-serif;">{name}</div>'''
+# --- ฟังก์ชันสร้าง Label ชื่อ (รองรับสี) ---
+def create_div_label(name, color="#D9534F"):
+    return f'''
+        <div style="
+            font-size: 11px; font-weight: 800; color: {color}; white-space: nowrap;
+            transform: translate(-50%, -150%); background-color: transparent;
+            text-shadow: 2px 2px 4px white, -2px -2px 4px white;
+            font-family: 'Inter', sans-serif;
+        ">
+            {name}
+        </div>
+    '''
 
 def img_to_custom_icon(img, issue_text):
     img_resized = img.copy()
@@ -156,7 +166,7 @@ def img_to_custom_icon(img, issue_text):
     img_resized.save(buf, format="JPEG", quality=70)
     img_str = base64.b64encode(buf.getvalue()).decode()
     return f'''
-        <div style="position: relative; width: fit-content; background-color: white; padding: 5px; border-radius: 12px; box-shadow: 0px 8px 24px rgba(0,0,0,0.12); border: 2px solid #FF8C42; transform: translate(-50%, -100%); margin-top: -10px;">
+        <div style="position: relative; width: fit-content; background-color: white; padding: 5px; border-radius: 12px; box-shadow: 0px 8px 24px rgba(0,0,0,0.12); border: 2px solid #FF8C42; transform: translate(-50%, -100%);">
             <div style="font-size: 11px; font-weight: 700; color: #2D5A27; margin-bottom: 4px; text-align: center;">{issue_text}</div>
             <img src="data:image/jpeg;base64,{img_str}" style="max-width: 140px; display: block; border-radius: 4px;">
             <div style="position: absolute; bottom: -10px; left: 50%; transform: translateX(-50%); width: 0; height: 0; border-left: 10px solid transparent; border-right: 10px solid transparent; border-top: 10px solid #FF8C42;"></div>
@@ -193,7 +203,6 @@ def create_summary_pptx(map_image_bytes, image_list):
             slide2.shapes.add_picture(buf, x, y, width=img_w, height=img_h)
             txt_box = slide2.shapes.add_textbox(x, y + img_h + Inches(0.05), img_w, Inches(0.6))
             tf = txt_box.text_frame
-            tf.word_wrap = True
             p1 = tf.paragraphs[0]; p1.text = f"สาเหตุ: {item['issue']}"; p1.font.size = Pt(8); p1.font.bold = True
             p2 = tf.add_paragraph(); p2.text = f"Lat: {item['lat']:.5f}\nLong: {item['lon']:.5f}"; p2.font.size = Pt(7)
     output = BytesIO(); prs.save(output)
@@ -214,30 +223,30 @@ header_html = f'''<div class="header-container"><div><h1 class="main-title">AI C
 {"<img src='data:image/png;base64,"+joker_base64+"' class='joker-icon'>" if joker_base64 else ""}</div>'''
 st.markdown(header_html, unsafe_allow_html=True)
 
-# --- 9. เมนู KML/KMZ (รองรับ 2 ชุด) ---
+# --- 9. เมนู KML/KMZ (2 ชุด) ---
 st.subheader("🌐 1. ข้อมูลโครงข่าย & จุดติดตั้ง (KML/KMZ)")
 col_kml1, col_kml2 = st.columns(2)
 with col_kml1:
-    kml_file = st.file_uploader("อัปโหลดไฟล์ KML หรือ KMZ (ชุดหลัก - สีแดง)", type=['kml', 'kmz'])
+    kml_file = st.file_uploader("อัปโหลดชุดหลัก (สีแดง)", type=['kml', 'kmz'])
 with col_kml2:
-    kml_file_yellow = st.file_uploader("อัปโหลดไฟล์ KML หรือ KMZ (ชุดเสริม - สีเหลือง)", type=['kml', 'kmz'])
+    kml_file_yellow = st.file_uploader("อัปโหลดชุดเสริม (สีเหลือง)", type=['kml', 'kmz'])
 
 kml_elements = []
 kml_points_pool = []
 yellow_elements = []
-all_bounds_for_zoom = []
+all_bounds = []
 
 if kml_file:
     kml_elements, kml_points_pool = parse_kml_data(kml_file)
-    for el in kml_elements: all_bounds_for_zoom.extend(el['points'])
+    for el in kml_elements: all_bounds.extend(el['points'])
 
 if kml_file_yellow:
     yellow_elements, _ = parse_kml_data(kml_file_yellow)
-    for el in yellow_elements: all_bounds_for_zoom.extend(el['points'])
+    for el in yellow_elements: all_bounds.extend(el['points'])
 
 st.markdown("<hr>", unsafe_allow_html=True)
 
-# --- 10. ส่วนรูปถ่ายสำรวจ ---
+# --- 10. รูปภาพสำรวจ ---
 uploaded_files = st.file_uploader("📁 2. อัปโหลดรูปภาพสำรวจ", type=['jpg','jpeg','png'], accept_multiple_files=True)
 if 'export_data' not in st.session_state: st.session_state.export_data = []
 
@@ -256,58 +265,55 @@ if uploaded_files:
             if lat:
                 issue = analyze_cable_issue(raw_data)
                 st.session_state.export_data.append({'img_obj': img_st, 'issue': issue, 'lat': lat, 'lon': lon})
-                all_bounds_for_zoom.append([lat, lon])
+                all_bounds.append([lat, lon])
 
 # Routing Logic (เฉพาะชุดหลัก)
 route_coords, route_distance = None, 0
-head_point, tail_point = get_farthest_points(kml_points_pool)
-if head_point and tail_point:
-    route_coords, route_distance = get_osrm_route_head_tail(head_point, tail_point)
+head_p, tail_p = get_farthest_points(kml_points_pool)
+if head_p and tail_p:
+    route_coords, route_distance = get_osrm_route_head_tail(head_p, tail_p)
 
 # --- แสดงผลแผนที่ ---
 if uploaded_files or kml_elements or yellow_elements:
     m = folium.Map(location=[13.75, 100.5], zoom_start=17, tiles="https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}", attr="Google", control_scale=True)
     
-    # 1. วาดเส้นทาง Route (จากชุดหลัก)
     if route_coords:
         folium.PolyLine(route_coords, color="#007BFF", weight=5, opacity=0.8, dash_array='10, 10').add_to(m)
-        st.info(f"📍 **ระยะทางโครงข่ายหลัก:** {route_distance/1000:.3f} กม. ({route_distance:,.0f} เมตร)")
+        st.info(f"📍 ระยะทางชุดหลัก: {route_distance/1000:.3f} กม.")
 
-    # 2. วาดชุดสีเหลือง (ชุดเสริม - โชว์อย่างเดียว)
+    # วาดชุดสีเหลือง (พร้อมชื่อ)
     for elem in yellow_elements:
         if elem['is_point']:
-            folium.Marker(elem['points'][0], icon=folium.Icon(color='orange', icon='info-sign')).add_to(m)
+            loc = elem['points'][0]
+            folium.Marker(loc, icon=folium.Icon(color='orange', icon='info-sign')).add_to(m)
+            folium.Marker(loc, icon=folium.DivIcon(html=create_div_label(elem['name'], "#CC9900"))).add_to(m)
         else:
             folium.PolyLine(elem['points'], color="#FFD700", weight=4, opacity=0.8).add_to(m)
 
-    # 3. วาดชุดสีแดง (ชุดหลัก)
+    # วาดชุดหลักสีแดง (พร้อมชื่อ)
     for elem in kml_elements:
         if elem['is_point']:
-            folium.Marker(elem['points'][0], icon=folium.Icon(color='red', icon='info-sign')).add_to(m)
-            folium.Marker(elem['points'][0], icon=folium.DivIcon(html=create_div_label(elem['name']))).add_to(m)
+            loc = elem['points'][0]
+            folium.Marker(loc, icon=folium.Icon(color='red', icon='info-sign')).add_to(m)
+            folium.Marker(loc, icon=folium.DivIcon(html=create_div_label(elem['name'], "#D9534F"))).add_to(m)
         else:
             folium.PolyLine(elem['points'], color="gray", weight=2, opacity=0.4, dash_array='5').add_to(m)
 
-    # 4. วาด Marker รูปถ่าย
+    # วาดรูปถ่ายสำรวจ
     for data in st.session_state.export_data:
         folium.Marker([data['lat'], data['lon']], icon=folium.DivIcon(html=img_to_custom_icon(data['img_obj'], data['issue']))).add_to(m)
 
     m.add_child(MeasureControl(position='topright', primary_length_unit='meters'))
-    
-    # Auto Zoom
-    if all_bounds_for_zoom:
-        m.fit_bounds(all_bounds_for_zoom, padding=[50, 50])
-    
+    if all_bounds: m.fit_bounds(all_bounds, padding=[50, 50])
     st_folium(m, height=900, use_container_width=True, key="survey_map")
 
 st.markdown("<hr>", unsafe_allow_html=True)
 st.subheader("📄 3. สร้างรายงาน PowerPoint")
-col1, col2 = st.columns([1, 1])
+col1, col2 = st.columns(2)
 with col1:
     map_cap = st.file_uploader("อัปโหลดรูป Capture แผนที่", type=['jpg','png'])
 if map_cap and st.session_state.export_data:
     with col2:
-        st.write(""); 
-        if st.button("🚀 สรุปรายงานและดาวน์โหลดไฟล์ PPTX"):
+        if st.button("🚀 ดาวน์โหลดรายงาน PPTX"):
             pptx_data = create_summary_pptx(map_cap.getvalue(), st.session_state.export_data)
-            st.download_button("📥 คลิกเพื่อดาวน์โหลดรายงาน", data=pptx_data, file_name="Cable_AI_Report.pptx")
+            st.download_button("📥 คลิกเพื่อดาวน์โหลด", data=pptx_data, file_name="Cable_AI_Report.pptx")
