@@ -227,13 +227,16 @@ st.markdown(header_html, unsafe_allow_html=True)
 # --- 9. เมนู KML/KMZ ---
 st.subheader("🌐 1. ข้อมูลโครงข่าย & จุดติดตั้ง (KML/KMZ)")
 
+# Import KMZ ชุด Overall (อยู่บน)
 kml_file_yellow = st.file_uploader("Import KMZ - Overall (ภาพรวมแผนที่)", type=['kml', 'kmz'])
+
+# Import KMZ ชุดหลักที่มีปัญหา (อยู่ล่าง)
 kml_file = st.file_uploader("Import KMZ - พิกัดที่มีปัญหาและเสนอคร่อม cable", type=['kml', 'kmz'])
 
 kml_elements = []
 kml_points_pool = []
 yellow_elements = []
-zoom_bounds = []
+zoom_bounds = [] # ล็อคเป้าหมายการซูม
 
 if kml_file_yellow:
     yellow_elements, _ = parse_kml_data(kml_file_yellow)
@@ -246,7 +249,8 @@ if kml_file:
 st.markdown("<hr>", unsafe_allow_html=True)
 
 # --- 10. ส่วนรูปภาพสำรวจ ---
-uploaded_files = st.file_uploader("📁 2. อัปโหลดรูปภาพสำรวจ", type=['jpg','jpeg','png'], accept_multiple_files=True)
+st.subheader("📁 2. อัปโหลดรูปภาพสำรวจ")
+uploaded_files = st.file_uploader("ลากและวางไฟล์ที่นี่", type=['jpg','jpeg','png'], accept_multiple_files=True, key="survey_uploader")
 if 'export_data' not in st.session_state: st.session_state.export_data = []
 
 if uploaded_files:
@@ -281,7 +285,7 @@ if uploaded_files or kml_elements or yellow_elements:
         control_scale=True
     )
     
-    # Tile Layer ความจาง 60%
+    # Tile Layer ความจาง 60% (Opacity 0.4)
     folium.TileLayer(
         tiles="https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}",
         attr="Google",
@@ -294,7 +298,7 @@ if uploaded_files or kml_elements or yellow_elements:
     if route_coords:
         folium.PolyLine(
             route_coords, 
-            color="#FF0000", 
+            color="#FF0000", # เส้นประสีแดง
             weight=5, 
             opacity=0.8, 
             dash_array='10, 10'
@@ -325,6 +329,7 @@ if uploaded_files or kml_elements or yellow_elements:
 
     m.add_child(MeasureControl(position='topright', primary_length_unit='meters'))
     
+    # Auto Zoom ไปยังพิกัดที่มีปัญหาและรูปถ่ายเป็นหลัก
     if zoom_bounds: 
         m.fit_bounds(zoom_bounds, padding=[50, 50])
     elif yellow_elements:
@@ -332,9 +337,7 @@ if uploaded_files or kml_elements or yellow_elements:
         for el in yellow_elements: all_yellow_pts.extend(el['points'])
         if all_yellow_pts: m.fit_bounds(all_yellow_pts, padding=[50, 50])
         
-    # ---------------------------------------------------------
-    # ปรับความสูงของแผนที่ให้เพิ่มขึ้นเป็น 1,200 พิกเซล
-    # ---------------------------------------------------------
+    # ปรับความสูงแผนที่ 1,200 พิกเซล
     st_folium(m, height=1200, use_container_width=True, key="survey_map")
 
 st.markdown("<hr>", unsafe_allow_html=True)
