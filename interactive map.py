@@ -3,7 +3,7 @@ import os
 import streamlit as st
 import folium
 from streamlit_folium import st_folium
-from folium.plugins import MeasureControl, Fullscreen, MarkerCluster
+from folium.plugins import MeasureControl
 from PIL import Image, ImageOps
 from PIL.ExifTags import TAGS, GPSTAGS
 import base64
@@ -76,7 +76,7 @@ def analyze_cable_issue(image_bytes):
     except Exception:
         return "cable ตกพื้น"
 
-# --- 4. ฟังก์ชันจัดการพิกัด ---
+# --- 4. ฟังก์ชันจัดการพิกัด (อัปเดตให้อ่านพิกัดไม่มี N/E ได้) ---
 def get_lat_lon_exif(image):
     try:
         exif = image._getexif()
@@ -98,16 +98,22 @@ def get_lat_lon_ocr(image):
     try:
         reader = load_ocr() 
         img_for_ocr = image.copy()
-        img_for_ocr.thumbnail((800, 800)) # ลดขนาดภาพลงอีกนิด ช่วยประหยัด RAM กันเว็บค้าง
+        img_for_ocr.thumbnail((1000, 1000)) 
         img_np = np.array(img_for_ocr.convert('RGB'))
+        # เพิ่มการอนุญาตให้อ่านช่องว่างและขึ้นบรรทัดใหม่
         results = reader.readtext(img_np, paragraph=True, allowlist='0123456789.NE ne \n')
         full_text = " ".join([res[1] for res in results])
         
+        # รูปแบบที่ 1: ค้นหาแบบมีตัว N และ E
         match1 = re.search(r'(\d+\.\d+)\s*[nN].*?(\d+\.\d+)\s*[eE]', full_text)
-        if match1: return float(match1.group(1)), float(match1.group(2))
-        
+        if match1: 
+            return float(match1.group(1)), float(match1.group(2))
+            
+        # รูปแบบที่ 2: ค้นหาตัวเลขทศนิยม 2 ชุดติดกัน (แก้ปัญหากล้องแบบใหม่)
         match2 = re.search(r'(\d{2}\.\d+)\s+(\d{3}\.\d+)', full_text)
-        if match2: return float(match2.group(1)), float(match2.group(2))
+        if match2:
+            return float(match2.group(1)), float(match2.group(2))
+            
     except: pass
     return None, None
 
@@ -174,8 +180,23 @@ def get_osrm_route_head_tail(start_coord, end_coord):
     except: pass
     return None, 0
 
+# --- 6. ฟังก์ชันสร้าง Label ชื่อ ---
 def create_div_label(name, color="#D9534F"):
     return f'''<div style="font-size: 11px; font-weight: 800; color: {color}; white-space: nowrap; transform: translate(-50%, -150%); background-color: transparent; text-shadow: 2px 2px 4px white, -2px -2px 4px white, 2px -2px 4px white, -2px 2px 4px white; font-family: 'Inter', sans-serif;">{name}</div>'''
+
+def img_to_custom_icon(img, issue_text):
+    img_resized = img.copy()
+    img_resized.thumbnail((150, 150)) 
+    buf = BytesIO()
+    img_resized.save(buf, format="JPEG", quality=70)
+    img_str = base64.b64encode(buf.getvalue()).decode()
+    return f'''
+        <div style="position: relative; width: fit-content; background-color: white; padding: 5px; border-radius: 12px; box-shadow: 0px 8px 24px rgba(0,0,0,0.12); border: 2px solid #FF8C42; transform: translate(-50%, -100%); margin-top: -10px;">
+            <div style="font-size: 11px; font-weight: 700; color: #2D5A27; margin-bottom: 4px; text-align: center;">{issue_text}</div>
+            <img src="data:image/jpeg;base64,{img_str}" style="max-width: 140px; display: block; border-radius: 4px;">
+            <div style="position: absolute; bottom: -10px; left: 50%; transform: translateX(-50%); width: 0; height: 0; border-left: 10px solid transparent; border-right: 10px solid transparent; border-top: 10px solid #FF8C42;"></div>
+        </div>
+    '''
 
 # --- 7. ฟังก์ชันสร้างรายงาน PowerPoint ---
 def create_summary_pptx(map_image_bytes, image_list, cable_type, route_distance, issue_kml_elements, impact_services, template_bytes=None):
@@ -308,7 +329,7 @@ def create_summary_pptx(map_image_bytes, image_list, cable_type, route_distance,
         p_title1.font.underline = True
         
     # ==========================================
-    # --- หน้าที่ 4: รูปภาพแสดงจุดที่มีปัญหา (แนวตั้ง) ---
+    # --- หน้าที่ 4: รูปภาพแสดงจุดที่มีปัญหา ---
     # ==========================================
     if image_list:
         slide2 = prs.slides.add_slide(prs.slide_layouts[6])
@@ -322,15 +343,13 @@ def create_summary_pptx(map_image_bytes, image_list, cable_type, route_distance,
         p_title2.font.underline = True
 
         cols, rows = 4, 2
-        img_w, img_h = Inches(1.3), Inches(1.8) 
+        img_w, img_h = Inches(1.8), Inches(1.3)
         margin_x = (Inches(7.8) - (img_w * cols)) / (cols + 1)
         margin_y = Inches(0.8) 
         
         for i, item in enumerate(image_list[:8]):
             curr_row, curr_col = i // cols, i % cols
-            x = margin_x + (curr_col * (img_w + margin_x))
-            y = margin_y + (curr_row * (img_h + Inches(0.65))) 
-            
+            x, y = margin_x + (curr_col * (img_w + margin_x)), margin_y + (curr_row * (img_h + Inches(0.8))) 
             image = item['img_obj'].copy()
             target_ratio = img_w / img_h
             w_px, h_px = image.size
@@ -342,10 +361,8 @@ def create_summary_pptx(map_image_bytes, image_list, cable_type, route_distance,
                 new_h = w_px / target_ratio
                 top = (h_px - new_h) / 2
                 image = image.crop((0, top, w_px, top + new_h))
-                
             buf = BytesIO(); image.save(buf, format="JPEG"); buf.seek(0)
             slide2.shapes.add_picture(buf, x, y, width=img_w, height=img_h)
-            
             txt_box = slide2.shapes.add_textbox(x, y + img_h + Inches(0.02), img_w, Inches(0.6))
             tf_img = txt_box.text_frame
             tf_img.word_wrap = True
@@ -361,6 +378,7 @@ st.set_page_config(page_title="AI Cable Survey", layout="wide")
 
 joker_base64 = get_image_base64_from_drive("1_G_r4yKyBA_vv3Nf8SdFpQ8UKv4bPLBr")
 
+# สร้าง CSS อัตโนมัติ (ใส่รูป Joker เป็นพื้นหลังของปุ่ม ดาวน์โหลด)
 custom_css = f"""
 <style>
     .stApp {{ background: linear-gradient(120deg, #FFF5ED 0%, #F0F9F1 100%); }}
@@ -368,11 +386,12 @@ custom_css = f"""
     .main-title {{ background: linear-gradient(90deg, #2D5A27 0%, #FF8C42 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-weight: 800; font-size: 2.6rem; margin: 0; }}
     .joker-icon {{ width: 100px; height: 100px; object-fit: cover; border-radius: 50%; border: 4px solid #FFFFFF; outline: 3px solid #FF8C42; }}
     
+    /* สไตล์ปุ่ม Download ให้สวยและตัวอักษรอยู่ตรงกลาง */
     .stDownloadButton>button {{ 
         background: linear-gradient(90deg, #A8E6CF 0%, #FFD3B6 100%); 
         color: #2D5A27 !important; 
         border-radius: 14px; 
-        padding: 15px 35px 15px 50px; 
+        padding: 15px 35px 15px 50px; /* เว้นที่ว่างด้านซ้ายให้รูปภาพ */
         font-weight: 800 !important; 
         width: 100%; 
         border: none;
@@ -382,6 +401,7 @@ custom_css = f"""
     }}
     .stDownloadButton>button:hover {{ transform: scale(1.02); }}
 """
+# ถ้าดึงรูปได้ ให้แทรกรูปไปในขอบปุ่ม
 if joker_base64:
     custom_css += f"""
     .stDownloadButton>button::before {{
@@ -455,17 +475,9 @@ if kml_points_pool:
             route_coords, route_distance = get_osrm_route_head_tail(f_p[0], f_p[1])
     except: pass
 
-# --- การสร้างแผนที่ ---
-map_orientation = "แนวนอน (Landscape)"
 if uploaded_files or kml_elements or yellow_elements:
-    st.markdown("---")
-    map_orientation = st.radio("📐 เลือกสัดส่วนแสดงผลแผนที่ (เพื่อให้แคปเจอร์ง่ายขึ้น):", ["แนวนอน (Landscape)", "แนวตั้ง (Portrait)"], horizontal=True)
-    map_h = 1200 if map_orientation == "แนวตั้ง (Portrait)" else 600
-    
     m = folium.Map(location=[13.75, 100.5], zoom_start=17, tiles=None, control_scale=True)
-    Fullscreen(position='topright').add_to(m)
     folium.TileLayer(tiles="https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}", attr="Google", name="Google Maps", opacity=0.4, overlay=False).add_to(m)
-    
     if route_coords:
         folium.PolyLine(route_coords, color="#FF0000", weight=5, opacity=0.8, dash_array='10, 10').add_to(m)
         st.info(f"📍 ระยะคร่อม cable: {route_distance/1000:.3f} กม. ({route_distance:,.0f} เมตร)")
@@ -479,39 +491,10 @@ if uploaded_files or kml_elements or yellow_elements:
             folium.Marker(elem['points'][0], icon=folium.Icon(color='red')).add_to(m)
             folium.Marker(elem['points'][0], icon=folium.DivIcon(html=create_div_label(elem['name'], "#D9534F"))).add_to(m)
         else: folium.PolyLine(elem['points'], color="gray", weight=2, opacity=0.4, dash_array='5').add_to(m)
-        
-    # --- อัปเดต: ใช้ Popup เพื่อกันรูปทับกัน ---
-    marker_cluster = MarkerCluster(name="Issue Photos").add_to(m)
-    
-    for d in st.session_state.export_data: 
-        # เตรียมรูปย่อสำหรับใส่ใน Popup
-        img_resized = d['img_obj'].copy()
-        img_resized.thumbnail((300, 300))
-        buf = BytesIO()
-        img_resized.save(buf, format="JPEG", quality=70)
-        img_str = base64.b64encode(buf.getvalue()).decode()
-        
-        # สร้างกล่อง HTML เล็กๆ ให้เด้งขึ้นมาตอนคลิก
-        popup_html = f'''
-            <div style="width: 220px; text-align: center; font-family: 'Inter', sans-serif;">
-                <img src="data:image/jpeg;base64,{img_str}" style="width: 100%; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);">
-                <div style="margin-top: 10px; font-size: 13px; font-weight: bold; color: #D9534F;">สาเหตุ: {d['issue']}</div>
-            </div>
-        '''
-        iframe = folium.IFrame(html=popup_html, width=240, height=260)
-        popup = folium.Popup(iframe, max_width=240)
-        
-        # สร้างหมุดสีแดงรูปกล้อง
-        folium.Marker(
-            [d['lat'], d['lon']], 
-            icon=folium.Icon(color='red', icon='camera', prefix='fa'),
-            popup=popup
-        ).add_to(marker_cluster)
-    # ----------------------------------------
-
+    for d in st.session_state.export_data: folium.Marker([d['lat'], d['lon']], icon=folium.DivIcon(html=img_to_custom_icon(d['img_obj'], d['issue']))).add_to(m)
     m.add_child(MeasureControl(position='topright', primary_length_unit='meters'))
     if zoom_bounds: m.fit_bounds(zoom_bounds, padding=[50, 50])
-    st_folium(m, height=map_h, use_container_width=True, key="survey_map")
+    st_folium(m, height=1200, use_container_width=True, key="survey_map")
 
 st.markdown("<hr>", unsafe_allow_html=True)
 st.subheader("📄 3. สร้างรายงาน PowerPoint")
@@ -521,11 +504,13 @@ selected_impact_services = []
 col_c1, col_c2 = st.columns(2)
 
 with col_c1:
+    # 1. จองพื้นที่ว่าง (Placeholder) ไว้แสดงข้อความแจ้งเตือนด้านบนสุด
     warning_placeholder = st.empty()
     
+    # 2. ข้อมูลอื่นๆ ตามลำดับ
     cable_type = st.selectbox("เลือก Type Cable", ["4", "6", "12", "24", "48", "96"])
     
-    st.markdown("<b> Service ที่กระทบ</b>", unsafe_allow_html=True)
+    st.markdown("<b>⚠️ Service ที่กระทบ</b>", unsafe_allow_html=True)
     if st.checkbox("1. EDS"): selected_impact_services.append("EDS")
     if st.checkbox("2. FBB"): selected_impact_services.append("FBB")
     
@@ -549,10 +534,12 @@ with col_c1:
         dwdm_text = st.text_input("ระบุรายละเอียด DWDM:", key="dwdm_text")
         selected_impact_services.append(f"DWDM ({dwdm_text})" if dwdm_text else "DWDM")
         
+    # 3. อัปโหลดแผนที่มาไว้ด้านล่าง Service ที่กระทบ
     map_cap = st.file_uploader("อัปโหลดรูป Capture แผนที่", type=['jpg','png'])
 
+    # 4. ปุ่มดาวน์โหลดแสดงด้านล่างสุดของฝั่งซ้าย (เมื่ออัปโหลดรูปแล้ว)
     if not map_cap:
-        warning_placeholder.info("📌 กรุณาอัปโหลดรูป **Capture แผนที่** ก่อน ปุ่มดาวน์โหลดรายงานถึงจะแสดงขึ้นมาครับ")
+        warning_placeholder.info("📌 กรุณาอัปโหลดรูป **Capture แผนที่** ทางด้านซ้ายก่อน ปุ่มดาวน์โหลดรายงานถึงจะแสดงขึ้นมาครับ")
     else:
         try:
             bg_template_id = "1EqtiR6CVnsbsVIg5Gk5j1v901YXYzjkz"
@@ -568,6 +555,7 @@ with col_c1:
                 template_bytes
             )
             
+            # เว้นระยะห่างก่อนปุ่มดาวน์โหลดนิดหน่อย
             st.markdown("<br>", unsafe_allow_html=True)
             
             st.download_button(
