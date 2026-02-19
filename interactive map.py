@@ -146,13 +146,13 @@ def get_osrm_route_head_tail(start_coord, end_coord):
     except: pass
     return None, 0
 
-# --- ฟังก์ชันสร้าง Label ชื่อ (รองรับสี) ---
+# --- 6. ฟังก์ชันสร้าง Label ชื่อสถานที่ ---
 def create_div_label(name, color="#D9534F"):
     return f'''
         <div style="
             font-size: 11px; font-weight: 800; color: {color}; white-space: nowrap;
             transform: translate(-50%, -150%); background-color: transparent;
-            text-shadow: 2px 2px 4px white, -2px -2px 4px white;
+            text-shadow: 2px 2px 4px white, -2px -2px 4px white, 2px -2px 4px white, -2px 2px 4px white;
             font-family: 'Inter', sans-serif;
         ">
             {name}
@@ -166,7 +166,7 @@ def img_to_custom_icon(img, issue_text):
     img_resized.save(buf, format="JPEG", quality=70)
     img_str = base64.b64encode(buf.getvalue()).decode()
     return f'''
-        <div style="position: relative; width: fit-content; background-color: white; padding: 5px; border-radius: 12px; box-shadow: 0px 8px 24px rgba(0,0,0,0.12); border: 2px solid #FF8C42; transform: translate(-50%, -100%);">
+        <div style="position: relative; width: fit-content; background-color: white; padding: 5px; border-radius: 12px; box-shadow: 0px 8px 24px rgba(0,0,0,0.12); border: 2px solid #FF8C42; transform: translate(-50%, -100%); margin-top: -10px;">
             <div style="font-size: 11px; font-weight: 700; color: #2D5A27; margin-bottom: 4px; text-align: center;">{issue_text}</div>
             <img src="data:image/jpeg;base64,{img_str}" style="max-width: 140px; display: block; border-radius: 4px;">
             <div style="position: absolute; bottom: -10px; left: 50%; transform: translateX(-50%); width: 0; height: 0; border-left: 10px solid transparent; border-right: 10px solid transparent; border-top: 10px solid #FF8C42;"></div>
@@ -203,6 +203,7 @@ def create_summary_pptx(map_image_bytes, image_list):
             slide2.shapes.add_picture(buf, x, y, width=img_w, height=img_h)
             txt_box = slide2.shapes.add_textbox(x, y + img_h + Inches(0.05), img_w, Inches(0.6))
             tf = txt_box.text_frame
+            tf.word_wrap = True
             p1 = tf.paragraphs[0]; p1.text = f"สาเหตุ: {item['issue']}"; p1.font.size = Pt(8); p1.font.bold = True
             p2 = tf.add_paragraph(); p2.text = f"Lat: {item['lat']:.5f}\nLong: {item['lon']:.5f}"; p2.font.size = Pt(7)
     output = BytesIO(); prs.save(output)
@@ -223,26 +224,27 @@ header_html = f'''<div class="header-container"><div><h1 class="main-title">AI C
 {"<img src='data:image/png;base64,"+joker_base64+"' class='joker-icon'>" if joker_base64 else ""}</div>'''
 st.markdown(header_html, unsafe_allow_html=True)
 
-# --- 9. เมนู KML/KMZ (2 ชุด) ---
+# --- 9. เมนู KML/KMZ (ปรับตำแหน่งตามความต้องการ) ---
 st.subheader("🌐 1. ข้อมูลโครงข่าย & จุดติดตั้ง (KML/KMZ)")
-col_kml1, col_kml2 = st.columns(2)
-with col_kml1:
-    kml_file = st.file_uploader("อัปโหลดชุดหลัก (สีแดง)", type=['kml', 'kmz'])
-with col_kml2:
-    kml_file_yellow = st.file_uploader("อัปโหลดชุดเสริม (สีเหลือง)", type=['kml', 'kmz'])
+
+# ชุดเสริมอยู่บน
+kml_file_yellow = st.file_uploader("อัปโหลดชุดเสริม - Overall (ภาพรวมแผนที่)", type=['kml', 'kmz'])
+
+# ชุดหลักอยู่ล่าง
+kml_file = st.file_uploader("อัปโหลดชุดหลัก - พิกัดที่มีปัญหาและเสนอคร่อม cable", type=['kml', 'kmz'])
 
 kml_elements = []
 kml_points_pool = []
 yellow_elements = []
 all_bounds = []
 
-if kml_file:
-    kml_elements, kml_points_pool = parse_kml_data(kml_file)
-    for el in kml_elements: all_bounds.extend(el['points'])
-
 if kml_file_yellow:
     yellow_elements, _ = parse_kml_data(kml_file_yellow)
     for el in yellow_elements: all_bounds.extend(el['points'])
+
+if kml_file:
+    kml_elements, kml_points_pool = parse_kml_data(kml_file)
+    for el in kml_elements: all_bounds.extend(el['points'])
 
 st.markdown("<hr>", unsafe_allow_html=True)
 
@@ -279,9 +281,9 @@ if uploaded_files or kml_elements or yellow_elements:
     
     if route_coords:
         folium.PolyLine(route_coords, color="#007BFF", weight=5, opacity=0.8, dash_array='10, 10').add_to(m)
-        st.info(f"📍 ระยะทางชุดหลัก: {route_distance/1000:.3f} กม.")
+        st.info(f"📍 ระยะทางชุดหลัก: {route_distance/1000:.3f} กม. ({route_distance:,.0f} เมตร)")
 
-    # วาดชุดสีเหลือง (พร้อมชื่อ)
+    # 1. วาดชุด Overall (สีเหลือง) พร้อมชื่อ
     for elem in yellow_elements:
         if elem['is_point']:
             loc = elem['points'][0]
@@ -290,7 +292,7 @@ if uploaded_files or kml_elements or yellow_elements:
         else:
             folium.PolyLine(elem['points'], color="#FFD700", weight=4, opacity=0.8).add_to(m)
 
-    # วาดชุดหลักสีแดง (พร้อมชื่อ)
+    # 2. วาดชุดพิกัดที่มีปัญหา (สีแดง) พร้อมชื่อ
     for elem in kml_elements:
         if elem['is_point']:
             loc = elem['points'][0]
@@ -299,12 +301,16 @@ if uploaded_files or kml_elements or yellow_elements:
         else:
             folium.PolyLine(elem['points'], color="gray", weight=2, opacity=0.4, dash_array='5').add_to(m)
 
-    # วาดรูปถ่ายสำรวจ
+    # 3. วาดรูปถ่ายสำรวจ
     for data in st.session_state.export_data:
         folium.Marker([data['lat'], data['lon']], icon=folium.DivIcon(html=img_to_custom_icon(data['img_obj'], data['issue']))).add_to(m)
 
     m.add_child(MeasureControl(position='topright', primary_length_unit='meters'))
-    if all_bounds: m.fit_bounds(all_bounds, padding=[50, 50])
+    
+    # Auto Zoom ไปยังขอบเขตข้อมูลทั้งหมด
+    if all_bounds: 
+        m.fit_bounds(all_bounds, padding=[50, 50])
+        
     st_folium(m, height=900, use_container_width=True, key="survey_map")
 
 st.markdown("<hr>", unsafe_allow_html=True)
