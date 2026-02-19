@@ -80,7 +80,6 @@ def get_lat_lon_exif(image):
 def get_lat_lon_ocr(image):
     try:
         reader = load_ocr() 
-        img_for_ocr = image.copy().thumbnail((1000, 1000)) 
         img_np = np.array(image.convert('RGB'))
         results = reader.readtext(img_np, paragraph=True, allowlist='0123456789.NE ne')
         full_text = " ".join([res[1] for res in results])
@@ -157,14 +156,15 @@ def img_to_custom_icon(img, issue_text):
         </div>
     '''
 
-# --- 7. ฟังก์ชันสร้างรายงาน PowerPoint (Final Update) ---
+# --- 7. ฟังก์ชันสร้างรายงาน PowerPoint (Final Setup) ---
 def create_summary_pptx(map_image_bytes, image_list, cable_type, route_distance, issue_kml_elements):
     prs = Presentation()
     prs.slide_width, prs.slide_height = Inches(10), Inches(5.625)
     
     # --- หน้า 1: สรุปรายละเอียด ---
     slide0 = prs.slides.add_slide(prs.slide_layouts[6])
-    t0 = slide0.shapes.add_textbox(Inches(0.5), Inches(0.5), Inches(9), Inches(1)).text_frame.paragraphs[0]
+    t0_box = slide0.shapes.add_textbox(Inches(0.5), Inches(0.5), Inches(9), Inches(1))
+    t0 = t0_box.text_frame.paragraphs[0]
     t0.text = f"รายงานสรุปแนวทางแก้ไขปัญหาและเสนอคร่อม Cable ({cable_type} Core)"
     t0.font.bold, t0.font.size = True, Pt(22)
     
@@ -179,21 +179,25 @@ def create_summary_pptx(map_image_bytes, image_list, cable_type, route_distance,
         p_el.text = f"  - {el['name']} (Lat: {el['points'][0][0]:.5f}, Long: {el['points'][0][1]:.5f})"
         p_el.font.size = Pt(12)
 
-    # --- หน้า 2: Topology Overall (รูปเต็มหน้า + หัวข้อขีดเส้นใต้) ---
+    # --- หน้า 2: Topology Overall (ภาพเต็มหน้า + หัวข้อขีดเส้นใต้) ---
     if map_image_bytes:
         slide1 = prs.slides.add_slide(prs.slide_layouts[6])
+        # 1. วางรูป Capture ให้เต็มหน้าจอ (ตำแหน่ง 0,0)
         slide1.shapes.add_picture(BytesIO(map_image_bytes), 0, 0, width=prs.slide_width, height=prs.slide_height)
         
+        # 2. วาง Title: Topology Overall มุมบนซ้าย + ขีดเส้นใต้
         title_box1 = slide1.shapes.add_textbox(Inches(0.2), Inches(0.1), Inches(4), Inches(0.5))
         p_title1 = title_box1.text_frame.paragraphs[0]
         p_title1.text = "Topology Overall"
-        p_title1.font.bold, p_title1.font.size = True, Pt(24)
-        p_title1.font.underline = True # ขีดเส้นใต้ตามสั่ง
+        p_title1.font.bold = True
+        p_title1.font.size = Pt(24)
+        p_title1.font.underline = True # ขีดเส้นใต้
 
-    # --- หน้า 3: รูปภาพแสดงจุดที่มีปัญหา ---
+    # --- หน้า 3: รูปภาพแสดงจุดที่มีปัญหา (Title ด้านบน) ---
     if image_list:
         slide2 = prs.slides.add_slide(prs.slide_layouts[6])
-        t2 = slide2.shapes.add_textbox(Inches(0.5), Inches(0.2), Inches(9), Inches(0.5)).text_frame.paragraphs[0]
+        t2_box = slide2.shapes.add_textbox(Inches(0.5), Inches(0.2), Inches(9), Inches(0.5))
+        t2 = t2_box.text_frame.paragraphs[0]
         t2.text = "รูปภาพแสดงจุดที่มีปัญหา"; t2.font.bold, t2.font.size = True, Pt(20)
 
         cols, rows = 4, 2
@@ -203,7 +207,6 @@ def create_summary_pptx(map_image_bytes, image_list, cable_type, route_distance,
         for i, item in enumerate(image_list[:8]):
             x, y = margin_x + ((i % cols) * (img_w + margin_x)), start_y + ((i // cols) * (img_h + Inches(0.8)))
             image = item['img_obj'].copy()
-            # Crop to aspect ratio 2.1:1.5
             target_ratio = img_w / img_h
             w_px, h_px = image.size
             if (w_px/h_px) > target_ratio:
@@ -216,6 +219,7 @@ def create_summary_pptx(map_image_bytes, image_list, cable_type, route_distance,
             buf = BytesIO(); image.save(buf, format="JPEG"); buf.seek(0)
             slide2.shapes.add_picture(buf, x, y, width=img_w, height=img_h)
             txt_box = slide2.shapes.add_textbox(x, y + img_h + Inches(0.05), img_w, Inches(0.6)).text_frame
+            txt_box.word_wrap = True
             p_iss = txt_box.paragraphs[0]; p_iss.text = f"สาเหตุ: {item['issue']}"; p_iss.font.size = Pt(8); p_iss.font.bold = True
             p_lat = txt_box.add_paragraph(); p_lat.text = f"Lat: {item['lat']:.5f}\nLong: {item['lon']:.5f}"; p_lat.font.size = Pt(7)
             
@@ -229,12 +233,14 @@ st.markdown("""<style>
     .header-container { display: flex; align-items: center; justify-content: space-between; padding: 25px; background: white; border-radius: 24px; border-bottom: 5px solid #FF8C42; margin-bottom: 30px; }
     .main-title { background: linear-gradient(90deg, #2D5A27 0%, #FF8C42 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-weight: 800; font-size: 2.6rem; margin: 0; }
     .joker-icon { width: 100px; height: 100px; object-fit: cover; border-radius: 50%; border: 4px solid #FFFFFF; outline: 3px solid #FF8C42; }
+    .stButton>button { background: #2D5A27; color: white; border-radius: 14px; padding: 12px 35px; font-weight: 600; width: 100%; }
 </style>""", unsafe_allow_html=True)
 
 joker_base64 = get_image_base64_from_drive("1_G_r4yKyBA_vv3Nf8SdFpQ8UKv4bPLBr")
 st.markdown(f'''<div class="header-container"><div><h1 class="main-title">AI Cable Plotter</h1><p style="margin:0; color: #718096; font-weight: 600;">By Joker EN-NMA</p></div>{"<img src='data:image/png;base64,"+joker_base64+"' class='joker-icon'>" if joker_base64 else ""}</div>''', unsafe_allow_html=True)
 
 # --- 9. Logic ส่วนควบคุม ---
+st.subheader("🌐 1. ข้อมูลโครงข่าย & จุดติดตั้ง (KML/KMZ)")
 kml_file_yellow = st.file_uploader("Import KMZ - Overall (ภาพรวมแผนที่)", type=['kml', 'kmz'])
 kml_file = st.file_uploader("Import KMZ - พิกัดที่มีปัญหาและเสนอคร่อม cable", type=['kml', 'kmz'])
 
@@ -253,13 +259,18 @@ uploaded_files = st.file_uploader("ลากและวางไฟล์ที
 if 'export_data' not in st.session_state: st.session_state.export_data = []
 
 if uploaded_files:
-    for f in uploaded_files:
-        raw_data = f.getvalue(); raw_img = Image.open(BytesIO(raw_data))
-        lat, lon = get_lat_lon_exif(raw_img)
-        if lat:
-            issue = analyze_cable_issue(raw_data)
-            st.session_state.export_data.append({'img_obj': ImageOps.exif_transpose(raw_img), 'issue': issue, 'lat': lat, 'lon': lon})
-            zoom_bounds.append([lat, lon])
+    current_hash = "".join([f.name + str(f.size) for f in uploaded_files])
+    if 'last_hash' not in st.session_state or st.session_state.last_hash != current_hash:
+        st.session_state.export_data = []
+        st.session_state.last_hash = current_hash
+        for f in uploaded_files:
+            raw_data = f.getvalue(); raw_img = Image.open(BytesIO(raw_data))
+            lat, lon = get_lat_lon_exif(raw_img)
+            if lat is None: lat, lon = get_lat_lon_ocr(raw_img)
+            if lat:
+                issue = analyze_cable_issue(raw_data)
+                st.session_state.export_data.append({'img_obj': ImageOps.exif_transpose(raw_img), 'issue': issue, 'lat': lat, 'lon': lon})
+                zoom_bounds.append([lat, lon])
 
 r_coords, r_dist = None, 0
 if k_pool:
@@ -285,6 +296,11 @@ c1, c2 = st.columns(2)
 with c1:
     cable_type = st.selectbox("เลือก Type Cable", ["4", "6", "12", "24", "48", "96"])
     map_cap = st.file_uploader("อัปโหลดรูป Capture แผนที่", type=['jpg','png'])
-if map_cap and st.button("🚀 ดาวน์โหลดรายงาน PPTX"):
-    pptx_data = create_summary_pptx(map_cap.getvalue(), st.session_state.export_data, cable_type, r_dist, k_elements)
-    st.download_button("📥 คลิกเพื่อดาวน์โหลด", data=pptx_data, file_name=f"Cable_Survey_{cable_type}C.pptx")
+if map_cap:
+    with c2:
+        if st.button("🚀 ดาวน์โหลดรายงาน PPTX"):
+            try:
+                pptx_data = create_summary_pptx(map_cap.getvalue(), st.session_state.export_data, cable_type, r_dist, k_elements)
+                st.download_button("📥 คลิกเพื่อดาวน์โหลดไฟล์", data=pptx_data, file_name=f"Cable_Survey_{cable_type}C.pptx", mime="application/vnd.openxmlformats-officedocument.presentationml.presentation")
+            except Exception as e:
+                st.error(f"เกิดข้อผิดพลาดในการสร้างไฟล์: {e}")
