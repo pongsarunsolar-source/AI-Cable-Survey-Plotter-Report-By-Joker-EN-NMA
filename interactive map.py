@@ -233,15 +233,15 @@ kml_file = st.file_uploader("Import KMZ - พิกัดที่มีปั�
 kml_elements = []
 kml_points_pool = []
 yellow_elements = []
-all_bounds = []
+zoom_bounds = [] # แยกตัวแปรสำหรับ Zoom ชุดหลักโดยเฉพาะ
 
 if kml_file_yellow:
     yellow_elements, _ = parse_kml_data(kml_file_yellow)
-    for el in yellow_elements: all_bounds.extend(el['points'])
 
 if kml_file:
     kml_elements, kml_points_pool = parse_kml_data(kml_file)
-    for el in kml_elements: all_bounds.extend(el['points'])
+    for el in kml_elements: 
+        zoom_bounds.extend(el['points'])
 
 st.markdown("<hr>", unsafe_allow_html=True)
 
@@ -264,7 +264,8 @@ if uploaded_files:
             if lat:
                 issue = analyze_cable_issue(raw_data)
                 st.session_state.export_data.append({'img_obj': img_st, 'issue': issue, 'lat': lat, 'lon': lon})
-                all_bounds.append([lat, lon])
+                # ถ้ารูปถ่ายมีพิกัด ให้รวมเข้าเป็นส่วนหนึ่งของการ Zoom ด้วย
+                zoom_bounds.append([lat, lon])
 
 # Routing Logic
 route_coords, route_distance = None, 0
@@ -274,20 +275,20 @@ if head_p and tail_p:
 
 # --- แสดงผลแผนที่ ---
 if uploaded_files or kml_elements or yellow_elements:
-    # สร้าง Map โดยใช้ TileLayer ที่ปรับ Opacity เป็น 50%
+    # สร้าง Map แบบไม่มี Tile เริ่มต้น
     m = folium.Map(
         location=[13.75, 100.5], 
         zoom_start=17, 
-        tiles=None, # ปิด tile เริ่มต้นเพื่อใส่ custom เอง
+        tiles=None, 
         control_scale=True
     )
     
-    # เพิ่ม Google Maps Tile Layer แบบจาง 50%
+    # เพิ่ม Tile Layer จางลง 60% (Opacity = 0.4)
     folium.TileLayer(
         tiles="https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}",
         attr="Google",
-        name="Google Maps (50%)",
-        opacity=0.5, # ปรับความจางที่นี่
+        name="Google Maps (Low Intensity)",
+        opacity=0.4, 
         overlay=False,
         control=True
     ).add_to(m)
@@ -296,7 +297,7 @@ if uploaded_files or kml_elements or yellow_elements:
         folium.PolyLine(route_coords, color="#007BFF", weight=5, opacity=0.8, dash_array='10, 10').add_to(m)
         st.info(f"📍 ระยะทางชุดหลัก: {route_distance/1000:.3f} กม. ({route_distance:,.0f} เมตร)")
 
-    # 1. Overall (สีเหลือง)
+    # 1. วาดชุด Overall (สีเหลือง)
     for elem in yellow_elements:
         if elem['is_point']:
             loc = elem['points'][0]
@@ -305,7 +306,7 @@ if uploaded_files or kml_elements or yellow_elements:
         else:
             folium.PolyLine(elem['points'], color="#FFD700", weight=4, opacity=0.8).add_to(m)
 
-    # 2. พิกัดที่มีปัญหา (สีแดง)
+    # 2. วาดชุดพิกัดที่มีปัญหา (สีแดง)
     for elem in kml_elements:
         if elem['is_point']:
             loc = elem['points'][0]
@@ -314,14 +315,20 @@ if uploaded_files or kml_elements or yellow_elements:
         else:
             folium.PolyLine(elem['points'], color="gray", weight=2, opacity=0.4, dash_array='5').add_to(m)
 
-    # 3. รูปถ่ายสำรวจ
+    # 3. วาดรูปถ่ายสำรวจ
     for data in st.session_state.export_data:
         folium.Marker([data['lat'], data['lon']], icon=folium.DivIcon(html=img_to_custom_icon(data['img_obj'], data['issue']))).add_to(m)
 
     m.add_child(MeasureControl(position='topright', primary_length_unit='meters'))
     
-    if all_bounds: 
-        m.fit_bounds(all_bounds, padding=[50, 50])
+    # Auto Zoom ไปยังขอบเขตของ "พิกัดที่มีปัญหา" และ "รูปถ่าย"
+    if zoom_bounds: 
+        m.fit_bounds(zoom_bounds, padding=[50, 50])
+    # ถ้าไม่มีพิกัดมีปัญหาเลย แต่มี Overall ให้ Zoom ไปหา Overall แทน (กรณี fallback)
+    elif yellow_elements:
+        all_yellow_pts = []
+        for el in yellow_elements: all_yellow_pts.extend(el['points'])
+        if all_yellow_pts: m.fit_bounds(all_yellow_pts, padding=[50, 50])
         
     st_folium(m, height=900, use_container_width=True, key="survey_map")
 
