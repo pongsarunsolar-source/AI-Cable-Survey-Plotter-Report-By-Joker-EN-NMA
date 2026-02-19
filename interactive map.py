@@ -413,7 +413,7 @@ if joker_base64:
 custom_css += "</style>"
 
 st.markdown(custom_css, unsafe_allow_html=True)
-header_html = f'''<div class="header-container"><div><h1 class="main-title">AI Cable Plotter</h1><p style="margin:0; color: #718096; font-weight: 600;">By Joker EN-NMA</p></div>{"<img src='data:image/png;base64,"+joker_base64+"' class='joker-icon'>" if joker_base64 else ""}</div>'''
+header_html = f'''<div class="header-container"><div><h1 class="main-title">AI Cable Plotter & Report</h1><p style="margin:0; color: #718096; font-weight: 600;">By Joker EN-NMA</p></div>{"<img src='data:image/png;base64,"+joker_base64+"' class='joker-icon'>" if joker_base64 else ""}</div>'''
 st.markdown(header_html, unsafe_allow_html=True)
 
 # --- 9. เมนู KML/KMZ ---
@@ -556,4 +556,5 @@ with col_c1:
             )
         except Exception as e:
             st.error(f"เกิดข้อผิดพลาดในการสร้างรายงาน: {e}")
+
 
