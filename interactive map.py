@@ -14,6 +14,8 @@ import re
 import requests
 from pptx import Presentation
 from pptx.util import Inches, Pt
+from pptx.dml.color import RGBColor
+from pptx.enum.text import PP_ALIGN
 from google import genai
 from google.genai import types
 import zipfile
@@ -190,16 +192,65 @@ def create_summary_pptx(map_image_bytes, image_list, cable_type, route_distance,
     prs = Presentation()
     prs.slide_width, prs.slide_height = Inches(10), Inches(5.625)
     
-    # ฟังก์ชันเสริมสำหรับวางภาพ Background
+    # ฟังก์ชันเสริมสำหรับวางภาพ Background Template AIS
     def apply_background(slide):
         if template_bytes:
             slide.shapes.add_picture(BytesIO(template_bytes), 0, 0, width=prs.slide_width, height=prs.slide_height)
 
-    # --- หน้าแรก: รายละเอียดสรุป ---
-    slide0 = prs.slides.add_slide(prs.slide_layouts[6])
-    apply_background(slide0) # ใส่พื้นหลัง AIS
+    # ==========================================
+    # --- หน้าที่ 1: หน้าปก (Cover Slide) ---
+    # ==========================================
+    slide_cover = prs.slides.add_slide(prs.slide_layouts[6])
+    apply_background(slide_cover)
     
-    # จำกัดความกว้างให้อยู่ในพื้นที่สีขาว (7.5 นิ้ว)
+    # กล่องข้อความหลัก (จัดให้อยู่โซนสีขาว กว้างประมาณ 7.5 นิ้ว)
+    cover_box = slide_cover.shapes.add_textbox(Inches(0.5), Inches(1.8), Inches(7.5), Inches(2))
+    tf_cover = cover_box.text_frame
+    
+    # 1. เอกสารประกอบ Imp_NMA-XX
+    p_cover1 = tf_cover.paragraphs[0]
+    p_cover1.alignment = PP_ALIGN.CENTER
+    run1 = p_cover1.add_run()
+    run1.text = "เอกสารประกอบ "
+    run1.font.size = Pt(32)
+    run1.font.color.rgb = RGBColor(0, 86, 179) # สีน้ำเงิน
+    
+    run2 = p_cover1.add_run()
+    run2.text = "Imp_NMA-XX"
+    run2.font.size = Pt(36)
+    run2.font.bold = True
+    run2.font.color.rgb = RGBColor(0, 86, 179)
+    
+    # 2. ข้อมูลนำเสนอปรับปรุง EN-NMA OSP
+    p_cover2 = tf_cover.add_paragraph()
+    p_cover2.alignment = PP_ALIGN.CENTER
+    run3 = p_cover2.add_run()
+    run3.text = "ข้อมูลนำเสนอปรับปรุง EN-NMA OSP\n"
+    run3.font.size = Pt(28)
+    run3.font.color.rgb = RGBColor(0, 86, 179)
+    
+    # 3. Improve Site XXXX
+    p_cover3 = tf_cover.add_paragraph()
+    p_cover3.alignment = PP_ALIGN.CENTER
+    run4 = p_cover3.add_run()
+    run4.text = "Improve Site XXXX"
+    run4.font.size = Pt(36)
+    run4.font.bold = True
+    run4.font.color.rgb = RGBColor(0, 86, 179)
+
+    # 4. กล่องข้อความมุมล่างซ้าย: Ver.Update Data ปัจจุบัน
+    ver_box = slide_cover.shapes.add_textbox(Inches(0.2), Inches(5.1), Inches(3), Inches(0.5))
+    p_ver = ver_box.text_frame.paragraphs[0]
+    p_ver.text = "Ver.Update Data ปัจจุบัน"
+    p_ver.font.size = Pt(12)
+    p_ver.font.color.rgb = RGBColor(0, 0, 0) # สีดำ
+
+    # ==========================================
+    # --- หน้าที่ 2: รายละเอียดสรุป (ตัดคำว่า Nameplate ออก) ---
+    # ==========================================
+    slide0 = prs.slides.add_slide(prs.slide_layouts[6])
+    apply_background(slide0) 
+    
     title_box = slide0.shapes.add_textbox(Inches(0.5), Inches(0.5), Inches(7.5), Inches(1))
     p_title = title_box.text_frame.paragraphs[0]
     p_title.text = f"รายงานสรุปแนวทางแก้ไขปัญหาและเสนอคร่อม Cable ({cable_type} Core)"
@@ -210,33 +261,26 @@ def create_summary_pptx(map_image_bytes, image_list, cable_type, route_distance,
     tf = info_box.text_frame
     tf.word_wrap = True
     
-    p1 = tf.paragraphs[0]
-    p1.text = f"• Type Cable: {cable_type} Core"
-    p1.font.size = Pt(16)
-    
-    p2 = tf.add_paragraph()
-    p2.text = f"• ระยะคร่อม Cable รวม: {route_distance:,.0f} เมตร ({route_distance/1000:.3f} กม.)"
-    p2.font.size = Pt(16)
-    
-    p3 = tf.add_paragraph()
-    p3.text = f"• รายละเอียดจุดปัญหา:" 
-    p3.font.bold = True
-    p3.font.size = Pt(16)
+    p1 = tf.paragraphs[0]; p1.text = f"• Type Cable: {cable_type} Core"; p1.font.size = Pt(16)
+    p2 = tf.add_paragraph(); p2.text = f"• ระยะคร่อม Cable รวม: {route_distance:,.0f} เมตร ({route_distance/1000:.3f} กม.)"; p2.font.size = Pt(16)
+    p3 = tf.add_paragraph(); p3.text = f"• รายละเอียดจุดปัญหา:"; p3.font.bold = True; p3.font.size = Pt(16)
     
     for el in issue_kml_elements[:10]:
         p_el = tf.add_paragraph()
         p_el.text = f"  - {el['name']} (Lat: {el['points'][0][0]:.5f}, Long: {el['points'][0][1]:.5f})"
         p_el.font.size = Pt(12)
 
-    # --- หน้าแผนที่ (หน้า 2) ---
+    # ==========================================
+    # --- หน้าที่ 3: ภาพแสดงแผนที่ ---
+    # ==========================================
     if map_image_bytes:
         slide1 = prs.slides.add_slide(prs.slide_layouts[6])
         apply_background(slide1)
         
-        # แสดงรูปภาพแผนที่เต็มจอ ทับพื้นหลังไปเลย
+        # แสดงรูปภาพแผนที่เต็มจอ
         slide1.shapes.add_picture(BytesIO(map_image_bytes), 0, 0, width=prs.slide_width, height=prs.slide_height)
         
-        # เพิ่ม Title: Topology Overall (ขีดเส้นใต้ มุมบนซ้าย)
+        # Title: Topology Overall (ขีดเส้นใต้ มุมบนซ้าย)
         title_box1 = slide1.shapes.add_textbox(Inches(0.2), Inches(0.1), Inches(5), Inches(0.5))
         p_title1 = title_box1.text_frame.paragraphs[0]
         p_title1.text = "Topology Overall"
@@ -244,12 +288,14 @@ def create_summary_pptx(map_image_bytes, image_list, cable_type, route_distance,
         p_title1.font.size = Pt(24)
         p_title1.font.underline = True
         
-    # --- หน้าพิกัดรูปถ่ายสำรวจ (หน้า 3) ---
+    # ==========================================
+    # --- หน้าที่ 4: รูปภาพแสดงจุดที่มีปัญหา ---
+    # ==========================================
     if image_list:
         slide2 = prs.slides.add_slide(prs.slide_layouts[6])
-        apply_background(slide2) # ใส่พื้นหลัง AIS
+        apply_background(slide2)
         
-        # เพิ่ม Title: รูปภาพแสดงจุดที่มีปัญหา (ขีดเส้นใต้ มุมบนซ้าย)
+        # Title: รูปภาพแสดงจุดที่มีปัญหา (ขีดเส้นใต้ มุมบนซ้าย)
         title_box2 = slide2.shapes.add_textbox(Inches(0.2), Inches(0.1), Inches(6), Inches(0.5))
         p_title2 = title_box2.text_frame.paragraphs[0]
         p_title2.text = "รูปภาพแสดงจุดที่มีปัญหา"
@@ -257,9 +303,8 @@ def create_summary_pptx(map_image_bytes, image_list, cable_type, route_distance,
         p_title2.font.size = Pt(22)
         p_title2.font.underline = True
 
-        # จัด Layout Grid ให้อยู่เฉพาะในโซนสีขาว (พื้นที่กว้างประมาณ 7.8 นิ้ว)
         cols, rows = 4, 2
-        img_w, img_h = Inches(1.8), Inches(1.3) # ปรับขนาดรูปให้เล็กลงนิดหน่อยเพื่อให้พอดี
+        img_w, img_h = Inches(1.8), Inches(1.3)
         margin_x = (Inches(7.8) - (img_w * cols)) / (cols + 1)
         margin_y = Inches(0.8) 
         
@@ -382,7 +427,7 @@ if map_cap:
     with col_c2:
         if st.button("🚀 ดาวน์โหลดรายงาน PPTX"):
             try:
-                # โหลด Template รูปภาพ AIS จากลิงก์ Google Drive ที่ให้มา
+                # โหลด Template รูปภาพ AIS จากลิงก์ Google Drive ที่คุณ Joker ให้มา
                 bg_template_id = "1EqtiR6CVnsbsVIg5Gk5j1v901YXYzjkz"
                 template_bytes = load_template_bytes(bg_template_id)
                 
