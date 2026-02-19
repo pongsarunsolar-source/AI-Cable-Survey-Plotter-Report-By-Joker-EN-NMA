@@ -157,12 +157,7 @@ def get_osrm_route_head_tail(start_coord, end_coord):
 # --- 6. ฟังก์ชันสร้าง Label ชื่อ ---
 def create_div_label(name, color="#D9534F"):
     return f'''
-        <div style="
-            font-size: 11px; font-weight: 800; color: {color}; white-space: nowrap;
-            transform: translate(-50%, -150%); background-color: transparent;
-            text-shadow: 2px 2px 4px white, -2px -2px 4px white, 2px -2px 4px white, -2px 2px 4px white;
-            font-family: 'Inter', sans-serif;
-        ">
+        <div style="font-size: 11px; font-weight: 800; color: {color}; white-space: nowrap; transform: translate(-50%, -150%); background-color: transparent; text-shadow: 2px 2px 4px white, -2px -2px 4px white, 2px -2px 4px white, -2px 2px 4px white; font-family: 'Inter', sans-serif;">
             {name}
         </div>
     '''
@@ -181,12 +176,47 @@ def img_to_custom_icon(img, issue_text):
         </div>
     '''
 
-def create_summary_pptx(map_image_bytes, image_list):
+# --- 7. ฟังก์ชันสร้างรายงาน PowerPoint (Update: หน้าสรุป Title) ---
+def create_summary_pptx(map_image_bytes, image_list, cable_type, route_distance, issue_kml_elements):
     prs = Presentation()
     prs.slide_width, prs.slide_height = Inches(10), Inches(5.625)
+    
+    # หน้าแรก: รายละเอียดสรุป (New)
+    slide0 = prs.slides.add_slide(prs.slide_layouts[6])
+    title_box = slide0.shapes.add_textbox(Inches(0.5), Inches(0.5), Inches(9), Inches(1))
+    p_title = title_box.text_frame.paragraphs[0]
+    p_title.text = f"รายงานสรุปแนวทางแก้ไขปัญหาและเสนอคร่อม Cable ({cable_type} Core)"
+    p_title.font.bold = True
+    p_title.font.size = Pt(22)
+    
+    info_box = slide0.shapes.add_textbox(Inches(0.5), Inches(1.5), Inches(9), Inches(3.5))
+    tf = info_box.text_frame
+    tf.word_wrap = True
+    
+    p1 = tf.paragraphs[0]
+    p1.text = f"• Type Cable: {cable_type} Core"
+    p1.font.size = Pt(16)
+    
+    p2 = tf.add_paragraph()
+    p2.text = f"• ระยะคร่อม Cable รวม: {route_distance:,.0f} เมตร ({route_distance/1000:.3f} กม.)"
+    p2.font.size = Pt(16)
+    
+    p3 = tf.add_paragraph()
+    p3.text = f"• รายละเอียดจุดปัญหา (Nameplate):"
+    p3.font.bold = True
+    p3.font.size = Pt(16)
+    
+    for el in issue_kml_elements[:10]: # แสดง 10 จุดแรก
+        p_el = tf.add_paragraph()
+        p_el.text = f"  - {el['name']} (Lat: {el['points'][0][0]:.5f}, Long: {el['points'][0][1]:.5f})"
+        p_el.font.size = Pt(12)
+
+    # หน้าสอง: แผนที่
     if map_image_bytes:
         slide1 = prs.slides.add_slide(prs.slide_layouts[6])
         slide1.shapes.add_picture(BytesIO(map_image_bytes), 0, 0, width=prs.slide_width, height=prs.slide_height)
+        
+    # หน้าสาม: รูปถ่ายสำรวจ
     if image_list:
         slide2 = prs.slides.add_slide(prs.slide_layouts[6])
         cols, rows = 4, 2
@@ -234,16 +264,11 @@ st.markdown(header_html, unsafe_allow_html=True)
 
 # --- 9. เมนู KML/KMZ ---
 st.subheader("🌐 1. ข้อมูลโครงข่าย & จุดติดตั้ง (KML/KMZ)")
-
 kml_file_yellow = st.file_uploader("Import KMZ - Overall (ภาพรวมแผนที่)", type=['kml', 'kmz'])
 kml_file = st.file_uploader("Import KMZ - พิกัดที่มีปัญหาและเสนอคร่อม cable", type=['kml', 'kmz'])
 
-# รวบรวมพิกัดทั้งหมดเพื่อทำ Auto Zoom
-zoom_bounds = []
-
-kml_elements = []
-kml_points_pool = []
-yellow_elements = []
+zoom_bounds = [] # รวบรวมพิกัดสำหรับ Auto Zoom
+kml_elements, kml_points_pool, yellow_elements = [], [], []
 
 if kml_file_yellow:
     yellow_elements, _ = parse_kml_data(kml_file_yellow)
@@ -278,7 +303,7 @@ if uploaded_files:
                 storage_img.thumbnail((1200, 1200))
                 st.session_state.export_data.append({'img_obj': storage_img, 'issue': issue, 'lat': lat, 'lon': lon})
 
-# เพิ่มพิกัดจากรูปภาพลงใน Zoom Bounds
+# เพิ่มพิกัดรูปถ่ายลง Zoom Bounds
 for data in st.session_state.export_data:
     zoom_bounds.append([data['lat'], data['lon']])
 
@@ -290,37 +315,23 @@ if head_p and tail_p:
 
 # --- แสดงผลแผนที่ ---
 if uploaded_files or kml_elements or yellow_elements:
-    m = folium.Map(
-        location=[13.75, 100.5], 
-        zoom_start=17, 
-        tiles=None, 
-        control_scale=True
-    )
-    
-    folium.TileLayer(
-        tiles="https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}",
-        attr="Google",
-        name="Google Maps (Low Intensity)",
-        opacity=0.4, 
-        overlay=False,
-        control=True
-    ).add_to(m)
+    m = folium.Map(location=[13.75, 100.5], zoom_start=17, tiles=None, control_scale=True)
+    folium.TileLayer(tiles="https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}", attr="Google", name="Google Maps", opacity=0.4, overlay=False).add_to(m)
     
     if route_coords:
         folium.PolyLine(route_coords, color="#FF0000", weight=5, opacity=0.8, dash_array='10, 10').add_to(m)
         st.info(f"📍 ระยะคร่อม cable: {route_distance/1000:.3f} กม. ({route_distance:,.0f} เมตร)")
 
-    # วาดข้อมูลต่างๆ ลงแผนที่
     for elem in yellow_elements:
         if elem['is_point']:
-            folium.Marker(elem['points'][0], icon=folium.Icon(color='orange', icon='info-sign')).add_to(m)
+            folium.Marker(elem['points'][0], icon=folium.Icon(color='orange')).add_to(m)
             folium.Marker(elem['points'][0], icon=folium.DivIcon(html=create_div_label(elem['name'], "#CC9900"))).add_to(m)
         else:
             folium.PolyLine(elem['points'], color="#FFD700", weight=4, opacity=0.8).add_to(m)
 
     for elem in kml_elements:
         if elem['is_point']:
-            folium.Marker(elem['points'][0], icon=folium.Icon(color='red', icon='info-sign')).add_to(m)
+            folium.Marker(elem['points'][0], icon=folium.Icon(color='red')).add_to(m)
             folium.Marker(elem['points'][0], icon=folium.DivIcon(html=create_div_label(elem['name'], "#D9534F"))).add_to(m)
         else:
             folium.PolyLine(elem['points'], color="gray", weight=2, opacity=0.4, dash_array='5').add_to(m)
@@ -329,20 +340,19 @@ if uploaded_files or kml_elements or yellow_elements:
         folium.Marker([data['lat'], data['lon']], icon=folium.DivIcon(html=img_to_custom_icon(data['img_obj'], data['issue']))).add_to(m)
 
     m.add_child(MeasureControl(position='topright', primary_length_unit='meters'))
-    
-    # --- ส่วนสำคัญ: Auto Zoom ---
-    if zoom_bounds: 
-        m.fit_bounds(zoom_bounds, padding=[50, 50])
-        
+    if zoom_bounds: m.fit_bounds(zoom_bounds, padding=[50, 50])
     st_folium(m, height=1200, use_container_width=True, key="survey_map")
 
+# --- Section 3: PPTX Report ---
 st.markdown("<hr>", unsafe_allow_html=True)
 st.subheader("📄 3. สร้างรายงาน PowerPoint")
-col1, col2 = st.columns(2)
-with col1:
+col_c1, col_c2 = st.columns(2)
+with col_c1:
+    cable_type = st.selectbox("เลือก Type Cable", ["4", "6", "12", "24", "48", "96"])
     map_cap = st.file_uploader("อัปโหลดรูป Capture แผนที่", type=['jpg','png'])
+
 if map_cap and st.session_state.export_data:
-    with col2:
+    with col_c2:
         if st.button("🚀 ดาวน์โหลดรายงาน PPTX"):
-            pptx_data = create_summary_pptx(map_cap.getvalue(), st.session_state.export_data)
-            st.download_button("📥 คลิกเพื่อดาวน์โหลด", data=pptx_data, file_name="Cable_AI_Report.pptx")
+            pptx_data = create_summary_pptx(map_cap.getvalue(), st.session_state.export_data, cable_type, route_distance, kml_elements)
+            st.download_button("📥 คลิกเพื่อดาวน์โหลด", data=pptx_data, file_name=f"Cable_Survey_{cable_type}C.pptx")
