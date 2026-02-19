@@ -268,7 +268,7 @@ def create_summary_pptx(map_image_bytes, image_list, cable_type, route_distance,
     p_scope.font.size = Pt(16)
 
     p_type = tf_scope.add_paragraph()
-    p_type.text = f"• Type Cable: {cable_type} Core"
+    p_type.text = f"• ขอ Replace Cable : {cable_type} Core"
     p_type.font.size = Pt(14)
 
     p_dist = tf_scope.add_paragraph()
@@ -464,3 +464,4 @@ if map_cap:
                 )
             except Exception as e:
                 st.error(f"เกิดข้อผิดพลาดในการสร้างรายงาน: {e}")
+
