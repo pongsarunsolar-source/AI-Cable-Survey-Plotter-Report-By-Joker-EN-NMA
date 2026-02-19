@@ -16,7 +16,7 @@ from pptx import Presentation
 from pptx.util import Inches, Pt
 from pptx.dml.color import RGBColor
 from pptx.enum.text import PP_ALIGN
-from pptx.enum.shapes import MSO_SHAPE 
+from pptx.enum.shapes import MSO_SHAPE
 from google import genai
 from google.genai import types
 import zipfile
@@ -188,7 +188,7 @@ def img_to_custom_icon(img, issue_text):
         </div>
     '''
 
-# --- 7. ฟังก์ชันสร้างรายงาน PowerPoint (รับพารามิเตอร์ impact_services เพิ่ม) ---
+# --- 7. ฟังก์ชันสร้างรายงาน PowerPoint ---
 def create_summary_pptx(map_image_bytes, image_list, cable_type, route_distance, issue_kml_elements, impact_services, template_bytes=None):
     prs = Presentation()
     prs.slide_width, prs.slide_height = Inches(10), Inches(5.625)
@@ -227,19 +227,17 @@ def create_summary_pptx(map_image_bytes, image_list, cable_type, route_distance,
     p_ver.font.color.rgb = RGBColor(0, 0, 0) 
 
     # ==========================================
-    # --- หน้าที่ 2: สรุปแนวทางแก้ไขปัญหา (เพิ่ม Service ที่กระทบ) ---
+    # --- หน้าที่ 2: สรุปแนวทางแก้ไขปัญหา ---
     # ==========================================
     slide0 = prs.slides.add_slide(prs.slide_layouts[6])
     apply_background(slide0) 
     
-    # 1. หัวข้อหลักด้านบน
     title_box = slide0.shapes.add_textbox(Inches(0.5), Inches(0.1), Inches(7.5), Inches(0.8))
     p_title = title_box.text_frame.paragraphs[0]
     p_title.text = f"รายงานสรุปแนวทางแก้ไขปัญหาและเสนอคร่อม Cable ({cable_type} Core)"
     p_title.font.bold = True
     p_title.font.size = Pt(22)
 
-    # 2. ปัญหา สาเหตุและผลกระทบ (พร้อมขีดเส้นใต้)
     prob_box = slide0.shapes.add_textbox(Inches(0.5), Inches(0.7), Inches(7.5), Inches(0.5))
     p_prob = prob_box.text_frame.paragraphs[0]
     p_prob.text = "ปัญหา สาเหตุและผลกระทบ"
@@ -247,7 +245,6 @@ def create_summary_pptx(map_image_bytes, image_list, cable_type, route_distance,
     p_prob.font.underline = True
     p_prob.font.size = Pt(14)
 
-    # 2.1 สร้างกรอบสี่เหลี่ยมไว้สำหรับพิมพ์ Manual
     shape_box = slide0.shapes.add_shape(MSO_SHAPE.RECTANGLE, Inches(0.6), Inches(1.1), Inches(7.0), Inches(0.6))
     shape_box.fill.background() 
     shape_box.line.color.rgb = RGBColor(0, 0, 0) 
@@ -256,7 +253,6 @@ def create_summary_pptx(map_image_bytes, image_list, cable_type, route_distance,
     p_guide.font.color.rgb = RGBColor(128, 128, 128)
     p_guide.font.size = Pt(10)
 
-    # 3. Service ที่กระทบ (ส่วนที่เพิ่มใหม่)
     srv_box = slide0.shapes.add_textbox(Inches(0.5), Inches(1.8), Inches(7.5), Inches(0.5))
     tf_srv = srv_box.text_frame
     p_srv_title = tf_srv.paragraphs[0]
@@ -265,7 +261,6 @@ def create_summary_pptx(map_image_bytes, image_list, cable_type, route_distance,
     p_srv_title.font.underline = True
     p_srv_title.font.size = Pt(14)
 
-    # แสดงรายการ Service ที่ถูกเลือก
     if impact_services:
         services_text = "   " + " / ".join(impact_services)
     else:
@@ -273,9 +268,8 @@ def create_summary_pptx(map_image_bytes, image_list, cable_type, route_distance,
     p_srv_list = tf_srv.add_paragraph()
     p_srv_list.text = services_text
     p_srv_list.font.size = Pt(12)
-    p_srv_list.font.color.rgb = RGBColor(255, 0, 0) # ไฮไลท์สีแดงให้เห็นชัดเจน
+    p_srv_list.font.color.rgb = RGBColor(255, 0, 0) 
 
-    # 4. Scope Of Work 
     scope_box = slide0.shapes.add_textbox(Inches(0.5), Inches(2.6), Inches(7.5), Inches(2.8))
     tf_scope = scope_box.text_frame
     tf_scope.word_wrap = True
@@ -297,7 +291,6 @@ def create_summary_pptx(map_image_bytes, image_list, cable_type, route_distance,
         p_dist.text = f"• ระยะคร่อม Cable รวม: 0 เมตร (0.000 กม.)"
     p_dist.font.size = Pt(12)
 
-    # รายละเอียดจุดปัญหา: 
     p_detail_title = tf_scope.add_paragraph()
     p_detail_title.text = "รายละเอียดจุดปัญหา:"
     p_detail_title.font.bold = True
@@ -369,29 +362,57 @@ def create_summary_pptx(map_image_bytes, image_list, cable_type, route_distance,
     output = BytesIO(); prs.save(output)
     return output.getvalue()
 
-# --- 8. UI Layout ---
+
+# --- 8. UI Layout & CSS Injection ---
 st.set_page_config(page_title="AI Cable Survey", layout="wide")
-st.markdown("""<style>
-    .stApp { background: linear-gradient(120deg, #FFF5ED 0%, #F0F9F1 100%); }
-    .header-container { display: flex; align-items: center; justify-content: space-between; padding: 25px; background: white; border-radius: 24px; border-bottom: 5px solid #FF8C42; margin-bottom: 30px; }
-    .main-title { background: linear-gradient(90deg, #2D5A27 0%, #FF8C42 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-weight: 800; font-size: 2.6rem; margin: 0; }
-    .joker-icon { width: 100px; height: 100px; object-fit: cover; border-radius: 50%; border: 4px solid #FFFFFF; outline: 3px solid #FF8C42; }
-    /* ปรับแต่งปุ่มดาวน์โหลด (พาสเทล เขียว-ส้ม) */
-    .stDownloadButton>button { 
+
+joker_base64 = get_image_base64_from_drive("1_G_r4yKyBA_vv3Nf8SdFpQ8UKv4bPLBr")
+
+# สร้าง CSS อัตโนมัติ (ใส่รูป Joker เป็นพื้นหลังของปุ่ม ดาวน์โหลด)
+custom_css = f"""
+<style>
+    .stApp {{ background: linear-gradient(120deg, #FFF5ED 0%, #F0F9F1 100%); }}
+    .header-container {{ display: flex; align-items: center; justify-content: space-between; padding: 25px; background: white; border-radius: 24px; border-bottom: 5px solid #FF8C42; margin-bottom: 30px; }}
+    .main-title {{ background: linear-gradient(90deg, #2D5A27 0%, #FF8C42 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-weight: 800; font-size: 2.6rem; margin: 0; }}
+    .joker-icon {{ width: 100px; height: 100px; object-fit: cover; border-radius: 50%; border: 4px solid #FFFFFF; outline: 3px solid #FF8C42; }}
+    
+    /* สไตล์ปุ่ม Download ให้สวยและตัวอักษรอยู่ตรงกลาง */
+    .stDownloadButton>button {{ 
         background: linear-gradient(90deg, #A8E6CF 0%, #FFD3B6 100%); 
-        color: #2D5A27; 
+        color: #2D5A27 !important; 
         border-radius: 14px; 
-        padding: 15px 35px; 
-        font-weight: 800; 
+        padding: 15px 35px 15px 50px; /* เว้นที่ว่างด้านซ้ายให้รูปภาพ */
+        font-weight: 800 !important; 
         width: 100%; 
         border: none;
         box-shadow: 0px 4px 10px rgba(0,0,0,0.1);
         transition: transform 0.2s;
-    }
-    .stDownloadButton>button:hover { transform: scale(1.02); }
-</style>""", unsafe_allow_html=True)
+        position: relative;
+    }}
+    .stDownloadButton>button:hover {{ transform: scale(1.02); }}
+"""
+# ถ้าดึงรูปได้ ให้แทรกรูปไปในขอบปุ่ม
+if joker_base64:
+    custom_css += f"""
+    .stDownloadButton>button::before {{
+        content: '';
+        background-image: url('data:image/png;base64,{joker_base64}');
+        background-size: cover;
+        background-position: center;
+        width: 28px;
+        height: 28px;
+        border-radius: 50%;
+        position: absolute;
+        left: 20px;
+        top: 50%;
+        transform: translateY(-50%);
+        border: 2px solid white;
+        box-shadow: 0px 2px 5px rgba(0,0,0,0.2);
+    }}
+    """
+custom_css += "</style>"
 
-joker_base64 = get_image_base64_from_drive("1_G_r4yKyBA_vv3Nf8SdFpQ8UKv4bPLBr")
+st.markdown(custom_css, unsafe_allow_html=True)
 header_html = f'''<div class="header-container"><div><h1 class="main-title">AI Cable Plotter</h1><p style="margin:0; color: #718096; font-weight: 600;">By Joker EN-NMA</p></div>{"<img src='data:image/png;base64,"+joker_base64+"' class='joker-icon'>" if joker_base64 else ""}</div>'''
 st.markdown(header_html, unsafe_allow_html=True)
 
@@ -468,7 +489,6 @@ if uploaded_files or kml_elements or yellow_elements:
 st.markdown("<hr>", unsafe_allow_html=True)
 st.subheader("📄 3. สร้างรายงาน PowerPoint")
 
-# สร้างตัวแปรเก็บ Service ที่เลือก
 selected_impact_services = []
 
 col_c1, col_c2 = st.columns(2)
@@ -476,9 +496,6 @@ with col_c1:
     cable_type = st.selectbox("เลือก Type Cable", ["4", "6", "12", "24", "48", "96"])
     map_cap = st.file_uploader("อัปโหลดรูป Capture แผนที่", type=['jpg','png'])
     
-    # -----------------------------------------------------
-    # ส่วน UI เพิ่มใหม่: Checkbox สำหรับเลือก Service ที่กระทบ
-    # -----------------------------------------------------
     st.markdown("<b>⚠️ Service ที่กระทบ</b>", unsafe_allow_html=True)
     if st.checkbox("1. EDS"): selected_impact_services.append("EDS")
     if st.checkbox("2. FBB"): selected_impact_services.append("FBB")
@@ -502,12 +519,12 @@ with col_c1:
     if cb_dwdm:
         dwdm_text = st.text_input("ระบุรายละเอียด DWDM:", key="dwdm_text")
         selected_impact_services.append(f"DWDM ({dwdm_text})" if dwdm_text else "DWDM")
-    # -----------------------------------------------------
 
-if map_cap:
-    with col_c2:
+with col_c2:
+    if not map_cap:
+        st.info("📌 กรุณาอัปโหลดรูป **Capture แผนที่** ทางด้านซ้ายก่อน ปุ่มดาวน์โหลดถึงจะแสดงขึ้นมาครับ")
+    else:
         try:
-            # โหลด Template รูปภาพ AIS จากลิงก์ Google Drive
             bg_template_id = "1EqtiR6CVnsbsVIg5Gk5j1v901YXYzjkz"
             template_bytes = load_template_bytes(bg_template_id)
             
@@ -517,23 +534,13 @@ if map_cap:
                 cable_type, 
                 route_distance, 
                 kml_elements, 
-                selected_impact_services, # ส่ง Array ของ Service ที่เลือกเข้าไปในฟังก์ชัน
+                selected_impact_services, 
                 template_bytes
             )
             
-            # HTML แต่งปุ่มดาวน์โหลดให้มีรูป Joker
-            btn_label = " ดาวน์โหลดรายงาน PPTX"
-            if joker_base64:
-                st.markdown(f"""
-                <div style="text-align:center; margin-bottom:-45px; position:relative; z-index:10; pointer-events:none;">
-                    <img src='data:image/png;base64,{joker_base64}' style='width:30px; height:30px; border-radius:50%; border:2px solid white; vertical-align:middle; margin-right:5px;'>
-                    <span style='font-weight:800; color:#2D5A27; vertical-align:middle;'>{btn_label}</span>
-                </div>
-                """, unsafe_allow_html=True)
-                btn_label = " "
-                
+            # โค้ดปุ่มดาวน์โหลดที่ตัวหนังสืออยู่ตรงกลาง และใช้ CSS คุมไอคอนทั้งหมด
             st.download_button(
-                label=btn_label, 
+                label="ดาวน์โหลดรายงาน PPTX", 
                 data=pptx_data, 
                 file_name=f"Cable_Survey_{cable_type}C.pptx",
                 mime="application/vnd.openxmlformats-officedocument.presentationml.presentation"
