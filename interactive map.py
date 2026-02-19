@@ -496,7 +496,7 @@ with col_c1:
     cable_type = st.selectbox("เลือก Type Cable", ["4", "6", "12", "24", "48", "96"])
     map_cap = st.file_uploader("อัปโหลดรูป Capture แผนที่", type=['jpg','png'])
     
-    st.markdown("<b>⚠️ Service ที่กระทบ</b>", unsafe_allow_html=True)
+    st.markdown("<b> Service ที่กระทบ</b>", unsafe_allow_html=True)
     if st.checkbox("1. EDS"): selected_impact_services.append("EDS")
     if st.checkbox("2. FBB"): selected_impact_services.append("FBB")
     
@@ -547,3 +547,4 @@ with col_c2:
             )
         except Exception as e:
             st.error(f"เกิดข้อผิดพลาดในการสร้างรายงาน: {e}")
+
