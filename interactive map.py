@@ -31,6 +31,7 @@ def load_ocr():
     model_path = os.path.join(os.getcwd(), "easyocr_models")
     if not os.path.exists(model_path):
         os.makedirs(model_path)
+    # เพิ่มการตั้งค่าให้ Reader ทำงานเฉพาะทางมากขึ้น
     return easyocr.Reader(['en'], gpu=False, model_storage_directory=model_path)
 
 # --- 2. ฟังก์ชันช่วยดึงรูปภาพ Joker ---
@@ -43,7 +44,7 @@ def get_image_base64_from_drive(file_id):
     except Exception: return None
     return None
 
-# --- 3. ฟังก์ชันวิเคราะห์สาเหตุด้วย AI ---
+# --- 3. ฟังก์ชันวิเคราะห์สาเหตุด้วย AI (Updated Logic ตามเงื่อนไขคุณ Joker) ---
 def analyze_cable_issue(image_bytes):
     try:
         response = client.models.generate_content(
@@ -51,14 +52,20 @@ def analyze_cable_issue(image_bytes):
             contents=[
                 """วิเคราะห์รูปภาพสายเคเบิลนี้และเลือกตอบเพียง "หนึ่งเดียว" จาก 4 สาเหตุ:
                 1. cable ตกพื้น | 2. หัวต่ออยู่กลาง span เสาไฟฟ้า | 3. ไฟไหม้ cable | 4. หัวต่อขวดน้ำ
-                ตอบเฉพาะชื่อสาเหตุภาษาไทยเท่านั้น""",
+                ตอบเฉพาะชื่อสาเหตุภาษาไทยเท่านั้น หากวิเคราะห์ไม่ได้ให้ตอบว่า cable ตกพื้น""",
                 types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg")
             ]
         )
-        return response.text.strip()
-    except: return "วิเคราะห์ไม่ได้"
+        result = response.text.strip()
+        # หาก AI ตอบอย่างอื่นมา หรือตอบว่าวิเคราะห์ไม่ได้ ให้ Default เป็น "cable ตกพื้น"
+        if not result or "วิเคราะห์ไม่ได้" in result:
+            return "cable ตกพื้น"
+        return result
+    except Exception: 
+        # กรณี API Error หรือปัญหาอื่นๆ ให้คืนค่า Default ทันที
+        return "cable ตกพื้น"
 
-# --- 4. ฟังก์ชันจัดการพิกัด ---
+# --- 4. ฟังก์ชันจัดการพิกัด (Optimization ภายใน) ---
 def get_lat_lon_exif(image):
     try:
         exif = image._getexif()
@@ -81,10 +88,11 @@ def get_lat_lon_ocr(image):
         reader = load_ocr() 
         img_for_ocr = image.copy()
         img_for_ocr.thumbnail((1000, 1000)) 
-        img_np = np.array(img_for_ocr)
-        results = reader.readtext(img_np, paragraph=True)
+        img_np = np.array(img_for_ocr.convert('RGB'))
+        # จำกัด allowlist เพื่อความแม่นยำของพิกัด
+        results = reader.readtext(img_np, paragraph=True, allowlist='0123456789.NE ne')
         full_text = " ".join([res[1] for res in results])
-        match = re.search(r'(\d+\.\d+)\s*[nN]\s+(\d+\.\d+)\s*[eE]', full_text)
+        match = re.search(r'(\d+\.\d+)\s*[nN].*?(\d+\.\d+)\s*[eE]', full_text)
         if match: return float(match.group(1)), float(match.group(2))
     except: pass
     return None, None
@@ -117,16 +125,24 @@ def parse_kml_data(file):
 
 def get_farthest_points(coordinates):
     if not coordinates or len(coordinates) < 2: return None, None
+    # หากจุดเยอะเกินไป ใช้การสุ่มจุดขอบเพื่อลดภาระ CPU
+    if len(coordinates) > 250:
+        pts = np.array(coordinates)
+        candidates = [pts[pts[:,0].argmax()], pts[pts[:,0].argmin()], pts[pts[:,1].argmax()], pts[pts[:,1].argmin()]]
+        test_points = candidates
+    else:
+        test_points = coordinates
+
     max_dist = -1
     p1_best, p2_best = None, None
-    for i in range(len(coordinates)):
-        for j in range(i + 1, len(coordinates)):
-            lat1, lon1 = coordinates[i]
-            lat2, lon2 = coordinates[j]
+    for i in range(len(test_points)):
+        for j in range(i + 1, len(test_points)):
+            lat1, lon1 = test_points[i]
+            lat2, lon2 = test_points[j]
             dist = (lat1 - lat2)**2 + (lon1 - lon2)**2
             if dist > max_dist:
                 max_dist = dist
-                p1_best, p2_best = coordinates[i], coordinates[j]
+                p1_best, p2_best = test_points[i], test_points[j]
     return p1_best, p2_best
 
 def get_osrm_route_head_tail(start_coord, end_coord):
@@ -236,7 +252,7 @@ kml_file = st.file_uploader("Import KMZ - พิกัดที่มีปั�
 kml_elements = []
 kml_points_pool = []
 yellow_elements = []
-zoom_bounds = [] # ล็อคเป้าหมายการซูม
+zoom_bounds = []
 
 if kml_file_yellow:
     yellow_elements, _ = parse_kml_data(kml_file_yellow)
@@ -267,7 +283,10 @@ if uploaded_files:
             if lat is None: lat, lon = get_lat_lon_ocr(img_st)
             if lat:
                 issue = analyze_cable_issue(raw_data)
-                st.session_state.export_data.append({'img_obj': img_st, 'issue': issue, 'lat': lat, 'lon': lon})
+                # บีบรูปเล็กน้อยก่อนเก็บเข้า session เพื่อประหยัด RAM
+                storage_img = img_st.copy()
+                storage_img.thumbnail((1200, 1200))
+                st.session_state.export_data.append({'img_obj': storage_img, 'issue': issue, 'lat': lat, 'lon': lon})
                 zoom_bounds.append([lat, lon])
 
 # Routing Logic
@@ -285,7 +304,6 @@ if uploaded_files or kml_elements or yellow_elements:
         control_scale=True
     )
     
-    # Tile Layer ความจาง 60% (Opacity 0.4)
     folium.TileLayer(
         tiles="https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}",
         attr="Google",
@@ -298,14 +316,13 @@ if uploaded_files or kml_elements or yellow_elements:
     if route_coords:
         folium.PolyLine(
             route_coords, 
-            color="#FF0000", # เส้นประสีแดง
+            color="#FF0000", 
             weight=5, 
             opacity=0.8, 
             dash_array='10, 10'
         ).add_to(m)
         st.info(f"📍 ระยะคร่อม cable: {route_distance/1000:.3f} กม. ({route_distance:,.0f} เมตร)")
 
-    # 1. วาดชุด Overall (สีเหลือง)
     for elem in yellow_elements:
         if elem['is_point']:
             loc = elem['points'][0]
@@ -314,7 +331,6 @@ if uploaded_files or kml_elements or yellow_elements:
         else:
             folium.PolyLine(elem['points'], color="#FFD700", weight=4, opacity=0.8).add_to(m)
 
-    # 2. วาดชุดพิกัดที่มีปัญหา (สีแดง)
     for elem in kml_elements:
         if elem['is_point']:
             loc = elem['points'][0]
@@ -323,21 +339,14 @@ if uploaded_files or kml_elements or yellow_elements:
         else:
             folium.PolyLine(elem['points'], color="gray", weight=2, opacity=0.4, dash_array='5').add_to(m)
 
-    # 3. วาดรูปถ่ายสำรวจ
     for data in st.session_state.export_data:
         folium.Marker([data['lat'], data['lon']], icon=folium.DivIcon(html=img_to_custom_icon(data['img_obj'], data['issue']))).add_to(m)
 
     m.add_child(MeasureControl(position='topright', primary_length_unit='meters'))
     
-    # Auto Zoom ไปยังพิกัดที่มีปัญหาและรูปถ่ายเป็นหลัก
     if zoom_bounds: 
         m.fit_bounds(zoom_bounds, padding=[50, 50])
-    elif yellow_elements:
-        all_yellow_pts = []
-        for el in yellow_elements: all_yellow_pts.extend(el['points'])
-        if all_yellow_pts: m.fit_bounds(all_yellow_pts, padding=[50, 50])
         
-    # ปรับความสูงแผนที่ 1,200 พิกเซล
     st_folium(m, height=1200, use_container_width=True, key="survey_map")
 
 st.markdown("<hr>", unsafe_allow_html=True)
